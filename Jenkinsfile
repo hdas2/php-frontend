@@ -30,13 +30,13 @@ pipeline {
             }
         }
         
-        /*stage('PHP Lint Check') {
+        stage('PHP Lint Check') {
             steps {
                 script {
                     try {
                         sh '''
-                        echo "Checking PHP syntax errors..."
-                        find app/ -type f -name "*.php" -exec php -l {} \\; | grep -v "No syntax errors"
+                        echo "Running PHP syntax check..."
+                        find app/src/ -type f -name "*.php" -print0 | xargs -0 -n1 -P4 php -l
                         '''
                         slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check passed")
                     } catch (e) {
@@ -45,7 +45,42 @@ pipeline {
                     }
                 }
             }
-        }*/
+        }
+
+        stage('Composer Unit Tests') {
+            steps {
+                script {
+                    try {
+                        sh '''
+                        echo "Running PHPUnit tests..."
+                        mkdir -p reports
+                        ./vendor/bin/phpunit --configuration phpunit.xml --log-junit reports/phpunit.xml --coverage-clover reports/coverage.xml
+                        '''
+                        slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHPUnit tests passed")
+                    } catch (e) {
+                        slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHPUnit tests failed")
+                        error "PHPUnit tests failed"
+                    }
+                }
+            }
+        }
+
+        stage('PHPStan Analyse') {
+            steps {
+                script {
+                    try {
+                        sh '''
+                        echo "Running PHPStan analyse..."
+                        ./vendor/bin/phpstan analyse app/src/ --level=5 --error-format=checkstyle > reports/phpstan-checkstyle.xml || true
+                        '''
+                        slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHPStan analyse completed")
+                    } catch (e) {
+                        slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHPStan analyse failed")
+                        error "PHPStan analyse failed"
+                    }
+                }
+            }
+        }
 
         stage('SonarQube Analysis') {
             steps {
@@ -56,12 +91,15 @@ pipeline {
                             sh """
                             sonar-scanner \
                                 -Dsonar.projectKey=${APP_NAME} \
-                                -Dsonar.sources=app \
+                                -Dsonar.sources=app/src \
                                 -Dsonar.host.url=${SONARQUBE_URL} \
                                 -Dsonar.login=${SONARQUBE_TOKEN} \
                                 -Dsonar.projectVersion=${env.BUILD_NUMBER} \
                                 -Dsonar.php.coverage.reportPaths=reports/coverage.xml \
-                                -Dsonar.php.tests.reportPath=reports/test-reports.xml
+                                -Dsonar.php.tests.reportPath=reports/phpunit.xml \
+                                -Dsonar.phpstan.reportPath=reports/phpstan-checkstyle.xml \
+                                -Dsonar.junit.reportPaths=reports/phpunit.xml
+
                             """
                         }
                         

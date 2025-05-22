@@ -36,7 +36,7 @@ $featuredImages = [
         <section class="gallery">
             <h3>Featured Images</h3>
             <div class="image-grid">
-                <?php foreach ($featuredImages as $image => $alt): ?>
+                <?php foreach ($featuredImages as $image => $alt) : ?>
                     <div class="image-item">
                         <img src="/images/<?= htmlspecialchars($image) ?>" alt="<?= htmlspecialchars($alt) ?>">
                         <p><?= htmlspecialchars($alt) ?></p>
