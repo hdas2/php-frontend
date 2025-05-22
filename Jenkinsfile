@@ -168,8 +168,8 @@ pipeline {
             steps {
                 script {
                     // Run Trivy scan and generate JSON report
-                    sh '/applications/php-frontend'
-                    sh 'trivy fs --security-checks vuln --format json --output trivy-report.json ./'
+                    sh ''' /applications/php-frontend \
+                    trivy fs --security-checks vuln --format json --output trivy-report.json ./ '''
                     
                     // Parse and send to Slack
                     def report = readJSON file: 'trivy-report.json'
