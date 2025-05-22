@@ -36,7 +36,7 @@ pipeline {
                     try {
                         sh '''
                         echo "Checking PHP syntax errors..."
-                        find app/ -type f -name "*.php" -exec php -l {} \; | grep -v "No syntax errors"
+                        find app/ -type f -name "*.php" -exec php -l {} \\; | grep -v "No syntax errors"
                         '''
                         slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check passed")
                     } catch (e) {
@@ -46,7 +46,7 @@ pipeline {
                 }
             }
         }
-        
+
         stage('SonarQube Analysis') {
             steps {
                 script {
