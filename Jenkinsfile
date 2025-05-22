@@ -164,86 +164,18 @@ pipeline {
             }
         }
         
-        stage('Trivy Filesystem Scan') {
-        steps {
-            script {
-            try {
-                // Run Trivy scan and output JSON
-                sh '''
-                cd /applications/php-frontend
-                mkdir -p reports
-                trivy fs --scanners vuln,misconfig,secret \
-                    --severity CRITICAL,HIGH \
-                    --format json \
-                    --output reports/trivy-fs-report.json \
-                    --exit-code 0 \
-                    app/
-                '''
-
-                // Read JSON results
-                def report = readJSON file: 'reports/trivy-fs-report.json'
-
-                int criticalCount = 0
-                int highCount = 0
-
-                report.Results.each { result ->
-                result.Vulnerabilities?.each { vuln ->
-                    if (vuln.Severity == "CRITICAL") criticalCount++
-                    if (vuln.Severity == "HIGH") highCount++
+        stage('Scan with Trivy') {
+            steps {
+                script {
+                    // Run Trivy scan and generate JSON report
+                    sh '/applications/php-frontend'
+                    sh 'trivy fs --security-checks vuln --format json --output trivy-report.json ./'
+                    
+                    // Parse and send to Slack
+                    def report = readJSON file: 'trivy-report.json'
+                    sendTrivyReportToSlack(report)
                 }
-                result.Misconfigurations?.each { misconfig ->
-                    if (["CRITICAL", "HIGH"].contains(misconfig.Severity)) {
-                    if (misconfig.Severity == "CRITICAL") criticalCount++
-                    if (misconfig.Severity == "HIGH") highCount++
-                    }
-                }
-                result.Secrets?.each { secret ->
-                    if (["CRITICAL", "HIGH"].contains(secret.Severity)) {
-                    if (secret.Severity == "CRITICAL") criticalCount++
-                    if (secret.Severity == "HIGH") highCount++
-                    }
-                }
-                }
-
-                // Prepare Slack message
-                def status = (criticalCount + highCount > 0) ? "❌ Issues Found" : "✅ No Critical/High Issues"
-                def slackMessage = """
-        *${status}*
-        *Trivy Filesystem Scan - ${env.JOB_NAME} #${env.BUILD_NUMBER}*
-        *Scan Path:* /applications/php-frontend/app
-        *Critical:* ${criticalCount}
-        *High:* ${highCount}
-        """
-
-                // Send Slack message
-                slackSend(
-                channel: env.SLACK_CHANNEL,
-                color: (criticalCount + highCount > 0) ? 'danger' : 'good',
-                message: slackMessage
-                )
-
-                // Upload JSON report
-                slackUploadFile(
-                channel: env.SLACK_CHANNEL,
-                filePath: 'reports/trivy-fs-report.json',
-                initialComment: "📦 Trivy Filesystem Full Report (JSON)"
-                )
-
-                // Fail build if criticals found
-                if (criticalCount > 0) {
-                error("Trivy found ${criticalCount} critical issues.")
-                }
-
-            } catch (err) {
-                slackSend(
-                channel: env.SLACK_CHANNEL,
-                color: 'danger',
-                message: "❌ Trivy scan failed for ${env.JOB_NAME} #${env.BUILD_NUMBER}\nError: ${err.getMessage()}"
-                )
-                error("Trivy scan failed: ${err.getMessage()}")
             }
-            }
-        }
         }
 
         stage('OWASP Dependency Check') {
@@ -473,23 +405,89 @@ pipeline {
     }
 }
 
-def generateFindingsSection = { String title, List items ->
-    if (!items) return ""
-    def section = """
-    ## ${title} (${items.size()})
-    | Severity | ID | Description | Details |
-    |----------|----|-------------|---------|
-    """
-    items.each { item ->
-        def details = ""
-        if (item.type == "VULNERABILITY") {
-            details = "Package: ${item.package}<br>Fixed in: ${item.fixed}"
-        } else if (item.type == "MISCONFIGURATION") {
-            details = "Resolution: ${item.resolution}"
-        } else if (item.type == "SECRET") {
-            details = "File: ${item.file}"
+def sendTrivyReportToSlack(report) {
+    // Count vulnerabilities by severity
+    def critical = 0
+    def high = 0
+    def medium = 0
+    def low = 0
+    
+    report.Results.each { result ->
+        result.Vulnerabilities?.each { vuln ->
+            switch(vuln.Severity) {
+                case 'CRITICAL': critical++; break
+                case 'HIGH': high++; break
+                case 'MEDIUM': medium++; break
+                case 'LOW': low++; break
+            }
         }
-        section += "| ${item.severity} | ${item.id} | ${item.title} | ${details} |\n"
     }
-    return section
+    
+    // Prepare Slack message
+    def message = """
+*Trivy Scan Results* :shield:
+        
+:red_circle: *Critical*: ${critical}
+:large_orange_circle: *High*: ${high}
+:yellow_circle: *Medium*: ${medium}
+:white_circle: *Low*: ${low}
+        
+*Top Findings:*
+${getTopFindings(report, 3)}
+"""
+    
+    // Send to Slack
+    slackSend(
+        channel: '#security-alerts',
+        message: message,
+        color: critical > 0 ? 'danger' : (high > 0 ? 'warning' : 'good')
+    )
+}
+
+def getTopFindings(report, limit) {
+    def findings = []
+    report.Results.each { result ->
+        result.Vulnerabilities?.each { vuln ->
+            findings << [
+                severity: vuln.Severity,
+                title: vuln.Title ?: vuln.VulnerabilityID,
+                package: "${vuln.PkgName}@${vuln.InstalledVersion}",
+                fixed: vuln.FixedVersion ?: 'No fix available'
+            ]
+        }
+    }
+    
+    // Sort by severity (critical first)
+    findings = findings.sort { -getSeverityWeight(it.severity) }
+    
+    // Format top findings
+    def formatted = []
+    findings.take(limit).eachWithIndex { finding, index ->
+        def emoji = getSeverityEmoji(finding.severity)
+        formatted << "${index+1}. ${emoji} *${finding.severity}*: ${finding.title}"
+        formatted << "   - Package: ${finding.package}"
+        formatted << "   - Fixed in: ${finding.fixed}"
+    }
+    
+    return formatted.join('\n')
+}
+
+def getSeverityWeight(severity) {
+    switch(severity) {
+        case 'CRITICAL': return 4
+        case 'HIGH': return 3
+        case 'MEDIUM': return 2
+        case 'LOW': return 1
+        default: return 0
+    }
+}
+
+def getSeverityEmoji(severity) {
+    switch(severity) {
+        case 'CRITICAL': return ':red_circle:'
+        case 'HIGH': return ':large_orange_circle:'
+        case 'MEDIUM': return ':yellow_circle:'
+        case 'LOW': return ':white_circle:'
+        default: return ':grey_question:'
+    }
 }
