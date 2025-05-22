@@ -32,81 +32,65 @@ pipeline {
         stage('PHP Lint Check') {
             steps {
                 script {
+                    // Workaround for ClassLoader issues
+                    @NonCPS
+                    def safeSh(cmd) {
+                        return sh(script: cmd, returnStdout: true).trim()
+                    }
+
                     try {
-                        // Change to the correct directory (if needed)
                         dir('/applications/php-frontend') {
-                            // Install composer dependencies (including dev dependencies)
-                            sh '''
-                            composer install --no-interaction --prefer-dist --optimize-autoloader --no-progress
-                            composer dump-autoload --optimize
-                            '''
-                            
-                            // Verify tools are available
-                            sh '''
-                            ls -la vendor/bin/
-                            which php
-                            php -v
-                            '''
-                            
+                            // Install dependencies with explicit paths
+                            safeSh('php /usr/local/bin/composer install --no-interaction --prefer-dist --optimize-autoloader')
+                            safeSh('php /usr/local/bin/composer dump-autoload --optimize')
+
+                            // Verify tools exist
+                            def tools = [
+                                'phpcs': 'vendor/squizlabs/php_codesniffer/bin/phpcs',
+                                'phpmd': 'vendor/phpmd/phpmd/src/bin/phpmd',
+                                'phpstan': 'vendor/phpstan/phpstan/bin/phpstan'
+                            ]
+
+                            tools.each { name, path ->
+                                if (!fileExists(path)) {
+                                    error("${name} tool not found at ${path}")
+                                }
+                            }
+
                             // Create reports directory
-                            sh 'mkdir -p reports'
-                            
-                            // Run PHP Code Sniffer
-                            sh '''
-                            php vendor/bin/phpcs --standard=PSR12 app/src/ --report=checkstyle --report-file=reports/phpcs.xml || true
-                            php vendor/bin/phpcbf --standard=PSR12 app/src/ || true
-                            '''
-                            
-                            // Run PHP Mess Detector
-                            sh '''
-                            php vendor/bin/phpmd app/src/ text codesize,unusedcode,naming --reportfile reports/phpmd.xml || true
-                            '''
-                            
-                            // Run PHPStan
-                            sh '''
-                            php vendor/bin/phpstan analyse app/src/ --level=5 --error-format=checkstyle > reports/phpstan.xml || true
-                            '''
-                            
-                            // Run PHP lint check
-                            def lintOutput = sh(
-                                script: 'find app/src/ -type f -name "*.php" -print0 | xargs -0 -n1 php -l',
-                                returnStdout: true
-                            ).trim()
-                            
-                            // Save lint output to file
+                            safeSh('mkdir -p reports')
+
+                            // Run analysis tools with full PHP paths
+                            safeSh("php ${tools.phpcs} --standard=PSR12 app/src/ --report=checkstyle --report-file=reports/phpcs.xml")
+                            safeSh("php ${tools.phpmd} app/src/ text codesize,unusedcode,naming --reportfile reports/phpmd.xml")
+                            safeSh("php ${tools.phpstan} analyse app/src/ --level=5 --error-format=checkstyle > reports/phpstan.xml")
+
+                            // PHP lint check
+                            def lintOutput = safeSh('find app/src/ -type f -name "*.php" -print0 | xargs -0 -n1 php -l')
                             writeFile file: 'reports/phplint.txt', text: lintOutput
-                            
-                            // Check for errors
+
                             if (lintOutput.contains("Errors parsing")) {
-                                echo "PHP lint errors found:\n${lintOutput}"
                                 slackSend(
                                     channel: SLACK_CHANNEL, 
                                     color: 'danger', 
-                                    message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check failed",
-                                    attachments: [
-                                        [text: lintOutput.take(1000), color: 'danger']
-                                    ]
+                                    message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check failed"
                                 )
-                                error "PHP lint check failed"
+                                error("PHP lint check failed")
                             } else {
-                                echo "PHP lint passed:\n${lintOutput}"
                                 slackSend(
                                     channel: SLACK_CHANNEL, 
                                     color: 'good', 
                                     message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check passed"
                                 )
                             }
-                            
-                            // Archive reports
-                            archiveArtifacts artifacts: 'reports/*', allowEmptyArchive: true
                         }
                     } catch (err) {
                         slackSend(
                             channel: SLACK_CHANNEL, 
                             color: 'danger', 
-                            message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check failed with error: ${err}"
+                            message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP analysis failed - ${err.message}"
                         )
-                        error "PHP lint check failed with exception"
+                        error("PHP analysis failed: ${err.message}")
                     }
                 }
             }
