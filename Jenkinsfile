@@ -32,58 +32,18 @@ pipeline {
         stage('PHP Lint Check') {
             steps {
                 script {
-                    try {
-                            // Install dependencies
-                            sh 'cd /applications/php-frontend'
-                            sh 'composer install --no-interaction --prefer-dist --optimize-autoloader'
-                            sh 'composer dump-autoload --optimize'
-
-                            // Verify tools exist
-                            if (!fileExists('vendor/squizlabs/php_codesniffer/bin/phpcs')) {
-                                error("phpcs tool not found")
-                            }
-                            if (!fileExists('vendor/phpmd/phpmd/src/bin/phpmd')) {
-                                error("phpmd tool not found")
-                            }
-                            if (!fileExists('vendor/phpstan/phpstan/bin/phpstan')) {
-                                error("phpstan tool not found")
-                            }
-
-                            // Create reports directory
-                            sh 'mkdir -p reports'
-
-                            // Run analysis tools
-                            sh 'php8 vendor/squizlabs/php_codesniffer/bin/phpcs --standard=PSR12 app/src/ --report=checkstyle --report-file=reports/phpcs.xml || true'
-                            sh 'php8 vendor/phpmd/phpmd/src/bin/phpmd app/src/ text codesize,unusedcode,naming --reportfile reports/phpmd.xml || true'
-                            sh 'php8 vendor/phpstan/phpstan/bin/phpstan analyse app/src/ --level=5 --error-format=checkstyle > reports/phpstan.xml || true'
-
-                            // PHP lint check
-                            def lintOutput = sh(script: 'find app/src/ -type f -name "*.php" -print0 | xargs -0 -n1 php -l', returnStdout: true).trim()
-                            writeFile file: 'reports/phplint.txt', text: lintOutput
-
-                            if (lintOutput.contains("Errors parsing")) {
-                                slackSend(
-                                    channel: env.SLACK_CHANNEL, 
-                                    color: 'danger', 
-                                    message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check failed"
-                                )
-                                error("PHP lint check failed")
-                            } else {
-                                slackSend(
-                                    channel: env.SLACK_CHANNEL, 
-                                    color: 'good', 
-                                    message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check passed"
-                                )
-                            }
-                        
-                    } catch (err) {
-                        slackSend(
-                            channel: env.SLACK_CHANNEL, 
-                            color: 'danger', 
-                            message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP analysis failed - ${err.message}"
-                        )
-                        error("PHP analysis failed: ${err.message}")
-                    }
+                    sh '''
+                    cd /applications/php-frontend
+                    composer lint
+                    echo "Running PHP lint check..."
+                    find app/ -name "*.php" -exec php -l {} \; > reports/php-lint-report.txt || true
+                    '''
+                    def lintReport = readFile('reports/php-lint-report.txt')
+                    if (lintReport) {
+                        slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check failed\n${lintReport}")
+                        error "PHP lint check failed"
+                    } else {
+                        slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check passed")
                 }
             }
         }
