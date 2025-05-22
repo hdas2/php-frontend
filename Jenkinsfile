@@ -276,7 +276,7 @@ pipeline {
                         slackMessage += "  _File:_ ${secret.file}\n"
                     }
                     if (secrets.size() > 1) {
-                        slackMessage += `_+ ${secrets.size() - 1} more secrets..._\n`
+                        slackMessage += "_+ ${secrets.size() - 1} more secrets..._\n"
                     }
                 }
 
