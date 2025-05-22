@@ -1,6 +1,6 @@
 pipeline {
     agent any
-    
+    customWorkspace '/application/php-frontend'
     environment {
         // Application Configuration
         APP_NAME = '-php-frontend'
