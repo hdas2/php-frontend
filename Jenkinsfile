@@ -265,7 +265,7 @@ pipeline {
                         slackMessage += "  _ID:_ ${misconfig.id}\n"
                     }
                     if (misconfigurations.size() > 2) {
-                        slackMessage += `_+ ${misconfigurations.size() - 2} more misconfigurations..._\n`
+                        slackMessage += "_+ ${misconfigurations.size() - 2} more misconfigurations..._\n"
                     }
                 }
 
