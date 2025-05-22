@@ -255,8 +255,7 @@ pipeline {
                         slackMessage += "  _Fixed in:_ ${finding.fixed}\n"
                     }
                     if (findings.size() > 3) {
-                        slackMessage += `_+ ${findings.size() - 3} more vulnerabilities..._\n`
-                    }
+                    slackMessage += "_+ ${findings.size() - 3} more vulnerabilities..._\n"
                 }
 
                 if (misconfigurations) {
