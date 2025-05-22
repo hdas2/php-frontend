@@ -340,28 +340,6 @@ pipeline {
             }
         }
 
-        // Helper function
-        def generateFindingsSection(String title, List items) {
-            if (!items) return ""
-            def section = """
-            ## ${title} (${items.size()})
-            | Severity | ID | Description | Details |
-            |----------|----|-------------|---------|
-            """
-            items.each { item ->
-                def details = ""
-                if (item.type == "VULNERABILITY") {
-                    details = "Package: ${item.package}<br>Fixed in: ${item.fixed}"
-                } else if (item.type == "MISCONFIGURATION") {
-                    details = "Resolution: ${item.resolution}"
-                } else if (item.type == "SECRET") {
-                    details = "File: ${item.file}"
-                }
-                section += "| ${item.severity} | ${item.id} | ${item.title} | ${details} |\n"
-            }
-            return section
-        }
-
         stage('OWASP Dependency Check') {
             steps {
                 script {
@@ -587,4 +565,25 @@ pipeline {
             }
         }
     }
+}
+
+def generateFindingsSection = { String title, List items ->
+    if (!items) return ""
+    def section = """
+    ## ${title} (${items.size()})
+    | Severity | ID | Description | Details |
+    |----------|----|-------------|---------|
+    """
+    items.each { item ->
+        def details = ""
+        if (item.type == "VULNERABILITY") {
+            details = "Package: ${item.package}<br>Fixed in: ${item.fixed}"
+        } else if (item.type == "MISCONFIGURATION") {
+            details = "Resolution: ${item.resolution}"
+        } else if (item.type == "SECRET") {
+            details = "File: ${item.file}"
+        }
+        section += "| ${item.severity} | ${item.id} | ${item.title} | ${details} |\n"
+    }
+    return section
 }
