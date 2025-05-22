@@ -168,15 +168,16 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Run Trivy scan and output to JSON in /applications/php-frontend
+                        // Run Trivy scan in the application directory and copy report to workspace
                         sh '''
                             cd /applications/php-frontend
+                            mkdir -p reports
                             echo "Running Trivy filesystem scan..."
                             trivy fs --scanners vuln,misconfig,secret --severity CRITICAL,HIGH --format json --output reports/trivy-fs-report.json app/
                             cp reports/trivy-fs-report.json ${WORKSPACE}/trivy-fs-report.json
                         '''
 
-                        // Parse and report results (now in Jenkins workspace)
+                        // Read the report from Jenkins workspace
                         def trivyReport = readJSON file: 'trivy-fs-report.json'
                         def criticalCount = 0
                         def highCount = 0
@@ -217,11 +218,11 @@ pipeline {
                         slackUploadFile(
                             channel: SLACK_CHANNEL,
                             filePath: 'trivy-fs-report.json',
-                            initialComment: "Full Trivy Filesystem Scan Report"
+                            initialComment: "📦 Full Trivy Filesystem Scan Report"
                         )
 
                         if (criticalCount > 0) {
-                            error "Trivy found ${criticalCount} critical vulnerabilities"
+                            error "❌ Trivy found ${criticalCount} critical vulnerabilities"
                         }
 
                     } catch (e) {
