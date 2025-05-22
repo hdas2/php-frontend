@@ -168,15 +168,16 @@ pipeline {
             steps {
                 script {
                     try {
+                        // Run Trivy scan and output to JSON in /applications/php-frontend
                         sh '''
-                        cd /applications/php-frontend
-                        echo "Running Trivy filesystem scan..."
-
-                        trivy fs --scanners vuln,misconfig,secret --severity CRITICAL,HIGH --format json --output reports/trivy-fs-report.json app/
+                            cd /applications/php-frontend
+                            echo "Running Trivy filesystem scan..."
+                            trivy fs --scanners vuln,misconfig,secret --severity CRITICAL,HIGH --format json --output reports/trivy-fs-report.json app/
+                            cp reports/trivy-fs-report.json ${WORKSPACE}/trivy-fs-report.json
                         '''
 
-                        // Parse and report results (no change to your JSON parsing logic)
-                        def trivyReport = readJSON file: '/applications/php-frontend/reports/trivy-fs-report.json'
+                        // Parse and report results (now in Jenkins workspace)
+                        def trivyReport = readJSON file: 'trivy-fs-report.json'
                         def criticalCount = 0
                         def highCount = 0
                         def findings = []
@@ -215,7 +216,7 @@ pipeline {
 
                         slackUploadFile(
                             channel: SLACK_CHANNEL,
-                            filePath: '/applications/php-frontend/reports/trivy-fs-report.json',
+                            filePath: 'trivy-fs-report.json',
                             initialComment: "Full Trivy Filesystem Scan Report"
                         )
 
