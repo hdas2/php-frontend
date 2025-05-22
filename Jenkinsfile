@@ -404,9 +404,24 @@ pipeline {
         }
         
         failure {
-            // Additional failure handling
             script {
-                // You can add more failure handling logic here
+                echo "❌ Build failed at stage: ${env.STAGE_NAME}"
+                
+                // Send Slack alert
+                slackSend(
+                    channel: SLACK_CHANNEL,
+                    color: 'danger',
+                    message: "🔥 *${env.JOB_NAME}* #${env.BUILD_NUMBER} failed at stage *${env.STAGE_NAME}*. Check: ${env.BUILD_URL}"
+                )
+                
+                // Mark build description
+                currentBuild.description = "Build failed at stage: ${env.STAGE_NAME}"
+                
+                // Archive the console log or important artifacts
+                archiveArtifacts artifacts: '**/logs/*.log', allowEmptyArchive: true
+                
+                // Optionally print environment info
+                sh 'env | sort'
             }
         }
     }
