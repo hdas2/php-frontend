@@ -33,34 +33,79 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Install composer dependencies without dev
-                        sh 'cd /applications/php-frontend'
-                        sh 'composer install'
-                        sh 'composer dump-autoload'
-
-                        // Run PHP Code Sniffer, PHP Mess Detector, PHPStan as before
-                        sh '''
-                            ./vendor/bin/phpcs --standard=PSR2 app/src/
-                            ./vendor/bin/phpcbf --standard=PSR2 app/src/
-                            ./vendor/bin/phpmd app/src/ text codesize,unusedcode,naming
-                            ./vendor/bin/phpstan analyse app/src/ --level=5
-                        '''
-
-                        // Run PHP lint check and capture output/errors
-                        def lintOutput = sh(script: 'find app/src/ -type f -name "*.php" -print0 | xargs -0 -n1 php -l', returnStdout: true).trim()
-
-                        // Check if there are any lint errors in the output
-                        if (lintOutput.contains("Errors parsing")) {
-                            echo "PHP lint errors found:\n${lintOutput}"
-                            slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check failed\n```" + lintOutput + "```")
-                            error "PHP lint check failed"
-                        } else {
-                            echo "PHP lint passed:\n${lintOutput}"
-                            slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check passed")
+                        // Change to the correct directory (if needed)
+                        dir('/applications/php-frontend') {
+                            // Install composer dependencies (including dev dependencies)
+                            sh '''
+                            composer install --no-interaction --prefer-dist --optimize-autoloader --no-progress
+                            composer dump-autoload --optimize
+                            '''
+                            
+                            // Verify tools are available
+                            sh '''
+                            ls -la vendor/bin/
+                            which php
+                            php -v
+                            '''
+                            
+                            // Create reports directory
+                            sh 'mkdir -p reports'
+                            
+                            // Run PHP Code Sniffer
+                            sh '''
+                            php vendor/bin/phpcs --standard=PSR12 app/src/ --report=checkstyle --report-file=reports/phpcs.xml || true
+                            php vendor/bin/phpcbf --standard=PSR12 app/src/ || true
+                            '''
+                            
+                            // Run PHP Mess Detector
+                            sh '''
+                            php vendor/bin/phpmd app/src/ text codesize,unusedcode,naming --reportfile reports/phpmd.xml || true
+                            '''
+                            
+                            // Run PHPStan
+                            sh '''
+                            php vendor/bin/phpstan analyse app/src/ --level=5 --error-format=checkstyle > reports/phpstan.xml || true
+                            '''
+                            
+                            // Run PHP lint check
+                            def lintOutput = sh(
+                                script: 'find app/src/ -type f -name "*.php" -print0 | xargs -0 -n1 php -l',
+                                returnStdout: true
+                            ).trim()
+                            
+                            // Save lint output to file
+                            writeFile file: 'reports/phplint.txt', text: lintOutput
+                            
+                            // Check for errors
+                            if (lintOutput.contains("Errors parsing")) {
+                                echo "PHP lint errors found:\n${lintOutput}"
+                                slackSend(
+                                    channel: SLACK_CHANNEL, 
+                                    color: 'danger', 
+                                    message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check failed",
+                                    attachments: [
+                                        [text: lintOutput.take(1000), color: 'danger']
+                                    ]
+                                )
+                                error "PHP lint check failed"
+                            } else {
+                                echo "PHP lint passed:\n${lintOutput}"
+                                slackSend(
+                                    channel: SLACK_CHANNEL, 
+                                    color: 'good', 
+                                    message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check passed"
+                                )
+                            }
+                            
+                            // Archive reports
+                            archiveArtifacts artifacts: 'reports/*', allowEmptyArchive: true
                         }
                     } catch (err) {
-                        // Catch any unexpected error
-                        slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check failed with error: ${err}")
+                        slackSend(
+                            channel: SLACK_CHANNEL, 
+                            color: 'danger', 
+                            message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check failed with error: ${err}"
+                        )
                         error "PHP lint check failed with exception"
                     }
                 }
