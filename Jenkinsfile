@@ -3,13 +3,13 @@ pipeline {
     
     environment {
         // Application Configuration
-        APP_NAME = 'rspl-sandbox-ecr'
+        APP_NAME = '-php-frontend'
         DOCKER_IMAGE = 'php-frontend'
         
         // AWS Configuration
         AWS_ACCOUNT_ID = '699951450237'
         AWS_REGION = 'ap-south-1'
-        ECR_REPO = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${DOCKER_IMAGE}"
+        ECR_REPO = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/rspl-sandbox-ecr/${DOCKER_IMAGE}"
         
         // Tool Configuration
         SONARQUBE_URL = 'https://sonarqube.retailershakti.com'
