@@ -35,6 +35,20 @@ pipeline {
                 script {
                     try {
                         sh '''
+                        composer install --no-dev
+                        echo "Running Composer autoload dump..."
+                        composer dump-autoload
+                        echo "Running PHP Code Sniffer..."
+                        ./vendor/bin/phpcs --standard=PSR2 app/src/
+                        echo "Running PHP Code Sniffer fix..."
+                        ./vendor/bin/phpcbf --standard=PSR2 app/src/
+                        echo "Running PHP Mess Detector..."
+                        ./vendor/bin/phpmd app/src/ text codesize,unusedcode,naming
+                        echo "Running PHPStan..."
+                        ./vendor/bin/phpstan analyse app/src/ --level=5
+                        echo "Running PHPStan fix..."
+                        ./vendor/bin/phpstan analyse app/src/ --level=5 --error-format=checkstyle > reports/phpstan-checkstyle.xml
+                        echo "Running PHPStan report..."    
                         echo "Running PHP syntax check..."
                         find app/src/ -type f -name "*.php" -print0 | xargs -0 -n1 -P4 php -l
                         '''
