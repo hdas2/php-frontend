@@ -1,7 +1,5 @@
 pipeline {
-    agent any {
-    customWorkspace '/application/php-frontend'
-    }
+    agent any 
     environment {
         // Application Configuration
         APP_NAME = '-php-frontend'
@@ -36,6 +34,7 @@ pipeline {
                 script {
                     try {
                         // Install composer dependencies without dev
+                        sh 'cd /applications/php-frontend'
                         sh 'composer install'
                         sh 'composer dump-autoload'
 
@@ -73,6 +72,7 @@ pipeline {
                 script {
                     try {
                         sh '''
+                        cd /applications/php-frontend
                         echo "Running PHPUnit tests..."
                         mkdir -p reports
                         ./vendor/bin/phpunit --configuration phpunit.xml --log-junit reports/phpunit.xml --coverage-clover reports/coverage.xml
@@ -91,6 +91,7 @@ pipeline {
                 script {
                     try {
                         sh '''
+                        cd /applications/php-frontend
                         echo "Running PHPStan analyse..."
                         ./vendor/bin/phpstan analyse app/src/ --level=5 --error-format=checkstyle > reports/phpstan-checkstyle.xml || true
                         '''
@@ -110,6 +111,7 @@ pipeline {
                         // Run SonarQube analysis
                         withSonarQubeEnv('sonarqube.retailershakti.com') {
                             sh """
+                            cd /applications/php-frontend \
                             sonar-scanner \
                                 -Dsonar.projectKey=${APP_NAME} \
                                 -Dsonar.sources=app/src \
@@ -194,6 +196,7 @@ pipeline {
                     try {
                         // Run Trivy scan and output to JSON
                         sh '''
+                        cd /applications/php-frontend
                         echo "Running Trivy filesystem scan..."
                         trivy fs --security-checks vuln,config,secret --severity CRITICAL,HIGH --format json --output reports/trivy-fs-report.json app/
                         '''
@@ -270,6 +273,7 @@ pipeline {
                     try {
                         // Run dependency check
                         sh '''
+                        cd /applications/php-frontend
                         echo "Running OWASP Dependency Check..."
                         dependency-check.sh --scan app --format HTML --format JSON --format XML --out reports/ --project ${APP_NAME}
                         '''
@@ -351,6 +355,7 @@ pipeline {
                 script {
                     try {
                         sh """
+                        cd /applications/php-frontend
                         echo "Building Docker image..."
                         docker build -t ${ECR_REPO}:${env.BUILD_NUMBER} .
                         """
@@ -368,6 +373,7 @@ pipeline {
                 script {
                     try {
                         sh """
+                        cd /applications/php-frontend
                         echo "Scanning Docker image for vulnerabilities..."
                         trivy image --exit-code 1 --severity CRITICAL --ignore-unfixed ${ECR_REPO}:${env.BUILD_NUMBER}
                         """
@@ -386,6 +392,7 @@ pipeline {
                     try {
                         withAWS(credentials: 'aws-credentials', region: AWS_REGION) {
                             sh """
+                            cd /applications/php-frontend
                             echo "Logging in to ECR..."
                             aws ecr get-login-password | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
                             
@@ -408,6 +415,7 @@ pipeline {
                     try {
                         withCredentials([string(credentialsId: 'argocd-token', variable: 'ARGOCD_TOKEN')]) {
                             sh """
+                            cd /applications/php-frontend
                             echo "Updating ArgoCD manifest with new image tag..."
                             
                             # Clone the GitOps repo
