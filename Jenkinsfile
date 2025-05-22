@@ -168,69 +168,67 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Run Trivy scan and output to JSON
                         sh '''
                         cd /applications/php-frontend
                         echo "Running Trivy filesystem scan..."
-                        trivy fs --security-checks vuln,config,secret --severity CRITICAL,HIGH --format json --output reports/trivy-fs-report.json app/
+
+                        mkdir -p reports
+                        chmod 777 reports
+
+                        trivy fs --scanners vuln,misconfig,secret --severity CRITICAL,HIGH --format json --output reports/trivy-fs-report.json app/
                         '''
-                        
-                        // Parse the JSON report
-                        def trivyReport = readJSON file: 'reports/trivy-fs-report.json'
+
+                        // Parse and report results (no change to your JSON parsing logic)
+                        def trivyReport = readJSON file: '/applications/php-frontend/reports/trivy-fs-report.json'
                         def criticalCount = 0
                         def highCount = 0
                         def findings = []
-                        
+
                         trivyReport.Results.each { result ->
-                            result.Vulnerabilities.each { vuln ->
+                            result.Vulnerabilities?.each { vuln ->
                                 if (vuln.Severity == "CRITICAL") criticalCount++
                                 if (vuln.Severity == "HIGH") highCount++
                                 findings << "${vuln.Severity}: ${vuln.VulnerabilityID} - ${vuln.Title}"
                             }
                         }
-                        
-                        // Format Slack message
+
                         def color = (criticalCount + highCount) > 0 ? 'danger' : 'good'
                         def statusEmoji = (criticalCount + highCount) > 0 ? '❌' : '✅'
-                        
+
                         def slackMessage = """
                         ${statusEmoji} *Trivy Filesystem Scan Results* - ${env.JOB_NAME} #${env.BUILD_NUMBER}
                         *Critical Findings:* ${criticalCount}
                         *High Findings:* ${highCount}
                         *Scan Target:* app/
                         """
-                        
-                        // Add sample findings if any
+
                         if (findings) {
                             slackMessage += "*Sample Findings:*\n${findings.take(5).join('\n')}"
                             if (findings.size() > 5) {
                                 slackMessage += "\n_+ ${findings.size() - 5} more findings..._"
                             }
                         }
-                        
-                        // Send to Slack
+
                         slackSend(
-                            channel: SLACK_CHANNEL, 
+                            channel: SLACK_CHANNEL,
                             color: color,
                             message: slackMessage,
                             failOnError: false
                         )
-                        
-                        // Also upload the full report
+
                         slackUploadFile(
                             channel: SLACK_CHANNEL,
-                            filePath: 'reports/trivy-fs-report.json',
+                            filePath: '/applications/php-frontend/reports/trivy-fs-report.json',
                             initialComment: "Full Trivy Filesystem Scan Report"
                         )
-                        
-                        // Fail if critical findings
+
                         if (criticalCount > 0) {
                             error "Trivy found ${criticalCount} critical vulnerabilities"
                         }
-                        
+
                     } catch (e) {
                         slackSend(
-                            channel: SLACK_CHANNEL, 
+                            channel: SLACK_CHANNEL,
                             color: 'danger',
                             message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Trivy filesystem scan failed\nError: ${e.message}",
                             failOnError: false
@@ -240,7 +238,7 @@ pipeline {
                 }
             }
         }
-        
+
         stage('OWASP Dependency Check') {
             steps {
                 script {
