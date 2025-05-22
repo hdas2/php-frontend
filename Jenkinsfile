@@ -35,7 +35,7 @@ pipeline {
                 script {
                     try {
                         // Install composer dependencies without dev
-                        sh 'composer install --no-dev --optimize-autoloader'
+                        sh 'composer install'
                         sh 'composer dump-autoload'
 
                         // Run PHP Code Sniffer, PHP Mess Detector, PHPStan as before
