@@ -35,8 +35,8 @@ pipeline {
                     try {
                         dir('/applications/php-frontend') {
                             // Install dependencies
-                            sh 'php /usr/local/bin/composer install --no-interaction --prefer-dist --optimize-autoloader'
-                            sh 'php /usr/local/bin/composer dump-autoload --optimize'
+                            sh 'composer install --no-interaction --prefer-dist --optimize-autoloader'
+                            sh 'composer dump-autoload --optimize'
 
                             // Verify tools exist
                             if (!fileExists('vendor/squizlabs/php_codesniffer/bin/phpcs')) {
