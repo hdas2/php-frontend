@@ -33,8 +33,8 @@ pipeline {
             steps {
                 script {
                     try {
-                        dir('/applications/php-frontend') {
                             // Install dependencies
+                            sh 'cd /applications/php-frontend'
                             sh 'composer install --no-interaction --prefer-dist --optimize-autoloader'
                             sh 'composer dump-autoload --optimize'
 
@@ -75,7 +75,7 @@ pipeline {
                                     message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check passed"
                                 )
                             }
-                        }
+                        
                     } catch (err) {
                         slackSend(
                             channel: env.SLACK_CHANNEL, 
