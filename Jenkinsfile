@@ -172,9 +172,6 @@ pipeline {
                         cd /applications/php-frontend
                         echo "Running Trivy filesystem scan..."
 
-                        mkdir -p reports
-                        chmod 777 reports
-
                         trivy fs --scanners vuln,misconfig,secret --severity CRITICAL,HIGH --format json --output reports/trivy-fs-report.json app/
                         '''
 
