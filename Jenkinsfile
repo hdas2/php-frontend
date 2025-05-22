@@ -165,166 +165,167 @@ pipeline {
         }
         
         stage('Trivy Filesystem Scan') {
-    steps {
-        script {
-            try {
-                // Run Trivy scan in the application directory
-                sh '''
-                    cd /applications/php-frontend
-                    mkdir -p reports
-                    echo "Running Trivy filesystem scan..."
-                    trivy fs --scanners vuln,misconfig,secret \
-                        --severity CRITICAL,HIGH \
-                        --format json \
-                        --output reports/trivy-fs-report.json \
-                        --exit-code 0 \
-                        app/
-                    cp reports/trivy-fs-report.json ${WORKSPACE}/trivy-fs-report.json
-                '''
+            steps {
+                script {
+                    try {
+                        // Run Trivy scan in the application directory
+                        sh '''
+                            cd /applications/php-frontend
+                            mkdir -p reports
+                            echo "Running Trivy filesystem scan..."
+                            trivy fs --scanners vuln,misconfig,secret \
+                                --severity CRITICAL,HIGH \
+                                --format json \
+                                --output reports/trivy-fs-report.json \
+                                --exit-code 0 \
+                                app/
+                            cp reports/trivy-fs-report.json ${WORKSPACE}/trivy-fs-report.json
+                        '''
 
-                // Parse the JSON report
-                def trivyReport = readJSON file: 'trivy-fs-report.json'
-                def criticalCount = 0
-                def highCount = 0
-                def findings = []
-                def misconfigurations = []
-                def secrets = []
+                        // Parse the JSON report
+                        def trivyReport = readJSON file: 'trivy-fs-report.json'
+                        def criticalCount = 0
+                        def highCount = 0
+                        def findings = []
+                        def misconfigurations = []
+                        def secrets = []
 
-                // Process vulnerabilities
-                trivyReport.Results.each { result ->
-                    // Vulnerabilities
-                    result.Vulnerabilities?.each { vuln ->
-                        if (vuln.Severity == "CRITICAL") criticalCount++
-                        if (vuln.Severity == "HIGH") highCount++
-                        findings << [
-                            type: "VULNERABILITY",
-                            severity: vuln.Severity,
-                            id: vuln.VulnerabilityID,
-                            package: "${vuln.PkgName}@${vuln.InstalledVersion}",
-                            title: vuln.Title,
-                            fixed: vuln.FixedVersion ?: "Not fixed"
-                        ]
-                    }
-                    
-                    // Misconfigurations
-                    result.Misconfigurations?.each { misconfig ->
-                        if (["CRITICAL", "HIGH"].contains(misconfig.Severity)) {
-                            misconfigurations << [
-                                type: "MISCONFIGURATION",
-                                severity: misconfig.Severity,
-                                id: misconfig.ID,
-                                title: misconfig.Title,
-                                description: misconfig.Description,
-                                resolution: misconfig.Resolution
-                            ]
+                        // Process Trivy results
+                        trivyReport.Results.each { result ->
+                            // Vulnerabilities
+                            result.Vulnerabilities?.each { vuln ->
+                                if (vuln.Severity == "CRITICAL") criticalCount++
+                                if (vuln.Severity == "HIGH") highCount++
+                                findings << [
+                                    type: "VULNERABILITY",
+                                    severity: vuln.Severity,
+                                    id: vuln.VulnerabilityID,
+                                    package: "${vuln.PkgName}@${vuln.InstalledVersion}",
+                                    title: vuln.Title,
+                                    fixed: vuln.FixedVersion ?: "Not fixed"
+                                ]
+                            }
+                            // Misconfigurations
+                            result.Misconfigurations?.each { misconfig ->
+                                if (["CRITICAL", "HIGH"].contains(misconfig.Severity)) {
+                                    misconfigurations << [
+                                        type: "MISCONFIGURATION",
+                                        severity: misconfig.Severity,
+                                        id: misconfig.ID,
+                                        title: misconfig.Title,
+                                        description: misconfig.Description,
+                                        resolution: misconfig.Resolution
+                                    ]
+                                }
+                            }
+                            // Secrets
+                            result.Secrets?.each { secret ->
+                                if (["CRITICAL", "HIGH"].contains(secret.Severity)) {
+                                    secrets << [
+                                        type: "SECRET",
+                                        severity: secret.Severity,
+                                        category: secret.Category,
+                                        match: secret.Match,
+                                        file: secret.File
+                                    ]
+                                }
+                            }
                         }
-                    }
-                    
-                    // Secrets
-                    result.Secrets?.each { secret ->
-                        if (["CRITICAL", "HIGH"].contains(secret.Severity)) {
-                            secrets << [
-                                type: "SECRET",
-                                severity: secret.Severity,
-                                category: secret.Category,
-                                match: secret.Match,
-                                file: secret.File
-                            ]
+
+                        // Slack summary message
+                        def color = (criticalCount + highCount) > 0 ? 'danger' : 'good'
+                        def statusEmoji = (criticalCount + highCount) > 0 ? '❌' : '✅'
+
+                        def slackMessage = """
+                        ${statusEmoji} *Trivy Filesystem Scan Results* - ${env.JOB_NAME} #${env.BUILD_NUMBER}
+                        *Scan Target:* `/applications/php-frontend/app`
+                        *Critical Findings:* ${criticalCount}
+                        *High Findings:* ${highCount}
+                        *Total Issues Found:* ${findings.size() + misconfigurations.size() + secrets.size()}
+                        """
+
+                        // Vulnerabilities
+                        if (findings) {
+                            slackMessage += "\n*📦 Vulnerabilities Found:*\n"
+                            findings.take(3).each { finding ->
+                                slackMessage += "• *${finding.severity}*: ${finding.id} - ${finding.title}\n"
+                                slackMessage += "  _Package:_ ${finding.package}\n"
+                                slackMessage += "  _Fixed in:_ ${finding.fixed}\n"
+                            }
+                            if (findings.size() > 3) {
+                                slackMessage += "_+ ${findings.size() - 3} more vulnerabilities..._\n"
+                            }
                         }
-                    }
-                }
 
-                // Prepare Slack message
-                def color = (criticalCount + highCount) > 0 ? 'danger' : 'good'
-                def statusEmoji = (criticalCount + highCount) > 0 ? '❌' : '✅'
+                        // Misconfigurations
+                        if (misconfigurations) {
+                            slackMessage += "\n*⚙️ Misconfigurations Found:*\n"
+                            misconfigurations.take(2).each { misconfig ->
+                                slackMessage += "• *${misconfig.severity}*: ${misconfig.title}\n"
+                                slackMessage += "  _ID:_ ${misconfig.id}\n"
+                            }
+                            if (misconfigurations.size() > 2) {
+                                slackMessage += "_+ ${misconfigurations.size() - 2} more misconfigurations..._\n"
+                            }
+                        }
 
-                def slackMessage = """
-                ${statusEmoji} *Trivy Filesystem Scan Results* - ${env.JOB_NAME} #${env.BUILD_NUMBER}
-                *Scan Target:* `/applications/php-frontend/app`
-                *Critical Findings:* ${criticalCount}
-                *High Findings:* ${highCount}
-                *Total Issues Found:* ${findings.size() + misconfigurations.size() + secrets.size()}
-                """
+                        // Secrets
+                        if (secrets) {
+                            slackMessage += "\n*🔑 Secrets Found:*\n"
+                            secrets.take(1).each { secret ->
+                                slackMessage += "• *${secret.severity}*: ${secret.category}\n"
+                                slackMessage += "  _File:_ ${secret.file}\n"
+                            }
+                            if (secrets.size() > 1) {
+                                slackMessage += "_+ ${secrets.size() - 1} more secrets..._\n"
+                            }
+                        }
 
-                // Add findings summary
-                if (findings) {
-                    slackMessage += "\n*📦 Vulnerabilities Found:*\n"
-                    findings.take(3).each { finding ->
-                        slackMessage += "• *${finding.severity}*: ${finding.id} - ${finding.title}\n"
-                        slackMessage += "  _Package:_ ${finding.package}\n"
-                        slackMessage += "  _Fixed in:_ ${finding.fixed}\n"
-                    }
-                    if (findings.size() > 3) {
-                    slackMessage += "_+ ${findings.size() - 3} more vulnerabilities..._\n"
-                }
+                        // Send to Slack
+                        slackSend(
+                            channel: SLACK_CHANNEL,
+                            color: color,
+                            message: slackMessage,
+                            failOnError: false
+                        )
 
-                if (misconfigurations) {
-                    slackMessage += "\n*⚙️ Misconfigurations Found:*\n"
-                    misconfigurations.take(2).each { misconfig ->
-                        slackMessage += "• *${misconfig.severity}*: ${misconfig.title}\n"
-                        slackMessage += "  _ID:_ ${misconfig.id}\n"
-                    }
-                    if (misconfigurations.size() > 2) {
-                        slackMessage += "_+ ${misconfigurations.size() - 2} more misconfigurations..._\n"
-                    }
-                }
+                        // Generate formatted markdown report
+                        def markdownReport = """
+                        # Trivy Filesystem Scan Report
+                        **Build:** ${env.JOB_NAME} #${env.BUILD_NUMBER}
+                        **Scan Date:** ${new Date().format("yyyy-MM-dd HH:mm:ss")}
+                        **Target:** /applications/php-frontend/app
 
-                if (secrets) {
-                    slackMessage += "\n*🔑 Secrets Found:*\n"
-                    secrets.take(1).each { secret ->
-                        slackMessage += "• *${secret.severity}*: ${secret.category}\n"
-                        slackMessage += "  _File:_ ${secret.file}\n"
-                    }
-                    if (secrets.size() > 1) {
-                        slackMessage += "_+ ${secrets.size() - 1} more secrets..._\n"
-                    }
-                }
+                        ## Summary
+                        - Critical Findings: ${criticalCount}
+                        - High Findings: ${highCount}
+                        - Total Issues: ${findings.size() + misconfigurations.size() + secrets.size()}
 
-                // Send to Slack
-                slackSend(
-                    channel: SLACK_CHANNEL,
-                    color: color,
-                    message: slackMessage,
-                    failOnError: false
-                )
+                        ## Details
+                        ${generateFindingsSection("Vulnerabilities", findings)}
+                        ${generateFindingsSection("Misconfigurations", misconfigurations)}
+                        ${generateFindingsSection("Secrets", secrets)}
+                        """
 
-                // Create a formatted markdown report for attachment
-                def markdownReport = """
-                # Trivy Filesystem Scan Report
-                **Build:** ${env.JOB_NAME} #${env.BUILD_NUMBER}
-                **Scan Date:** ${new Date().format("yyyy-MM-dd HH:mm:ss")}
-                **Target:** `/applications/php-frontend/app`
+                        writeFile file: 'trivy-fs-report.md', text: markdownReport
 
-                ## Summary
-                - Critical Findings: ${criticalCount}
-                - High Findings: ${highCount}
-                - Total Issues: ${findings.size() + misconfigurations.size() + secrets.size()}
+                        // Upload reports
+                        slackUploadFile(
+                            channel: SLACK_CHANNEL,
+                            filePath: 'trivy-fs-report.json',
+                            initialComment: "Full JSON Trivy Report"
+                        )
 
-                ## Details
-                ${generateFindingsSection("Vulnerabilities", findings)}
-                ${generateFindingsSection("Misconfigurations", misconfigurations)}
-                ${generateFindingsSection("Secrets", secrets)}
-                """
+                        slackUploadFile(
+                            channel: SLACK_CHANNEL,
+                            filePath: 'trivy-fs-report.md',
+                            initialComment: "Formatted Markdown Trivy Report"
+                        )
 
-                writeFile file: 'trivy-fs-report.md', text: markdownReport
-                
-                // Upload both JSON and formatted markdown
-                slackUploadFile(
-                    channel: SLACK_CHANNEL,
-                    filePath: 'trivy-fs-report.json',
-                    initialComment: "Full JSON report"
-                )
-                
-                slackUploadFile(
-                    channel: SLACK_CHANNEL,
-                    filePath: 'trivy-fs-report.md',
-                    initialComment: "Formatted Markdown Report"
-                )
-
-                // Fail build if critical findings
-                if (criticalCount > 0) {
-                    error "❌ Trivy found ${criticalCount} critical vulnerabilities"
-                }
+                        // Fail build on critical vulnerabilities
+                        if (criticalCount > 0) {
+                            error "❌ Trivy found ${criticalCount} critical vulnerabilities"
+                        }
 
                     } catch (e) {
                         slackSend(
@@ -339,29 +340,25 @@ pipeline {
             }
         }
 
-        // Helper function to generate findings sections
-        def generateFindingsSection(String title, List findings) {
-            if (!findings) return ""
-            
+        // Helper function
+        def generateFindingsSection(String title, List items) {
+            if (!items) return ""
             def section = """
-            ## ${title} (${findings.size()})
+            ## ${title} (${items.size()})
             | Severity | ID | Description | Details |
             |----------|----|-------------|---------|
             """
-            
-            findings.each { finding ->
+            items.each { item ->
                 def details = ""
-                if (finding.type == "VULNERABILITY") {
-                    details = "Package: ${finding.package}\nFixed in: ${finding.fixed}"
-                } else if (finding.type == "MISCONFIGURATION") {
-                    details = "Resolution: ${finding.resolution}"
-                } else if (finding.type == "SECRET") {
-                    details = "File: ${finding.file}"
+                if (item.type == "VULNERABILITY") {
+                    details = "Package: ${item.package}<br>Fixed in: ${item.fixed}"
+                } else if (item.type == "MISCONFIGURATION") {
+                    details = "Resolution: ${item.resolution}"
+                } else if (item.type == "SECRET") {
+                    details = "File: ${item.file}"
                 }
-                
-                section += "| ${finding.severity} | ${finding.id} | ${finding.title} | ${details} |\n"
+                section += "| ${item.severity} | ${item.id} | ${item.title} | ${details} |\n"
             }
-            
             return section
         }
 
