@@ -43,7 +43,8 @@ pipeline {
                         error "PHP lint check failed"
                     } else {
                         slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check passed")
-                }
+                    }
+                }   
             }
         }
 
