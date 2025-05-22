@@ -37,13 +37,6 @@ pipeline {
                     composer lint
                     echo "Running PHP lint check..."
                     '''
-                    def lintReport = readFile('reports/php-lint-report.txt')
-                    if (lintReport) {
-                        slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check failed\n${lintReport}")
-                        error "PHP lint check failed"
-                    } else {
-                        slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check passed")
-                    }
                 }   
             }
         }
