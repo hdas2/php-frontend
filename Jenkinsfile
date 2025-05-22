@@ -34,28 +34,34 @@ pipeline {
             steps {
                 script {
                     try {
+                        // Install composer dependencies without dev
+                        sh 'composer install --no-dev'
+                        sh 'composer dump-autoload'
+
+                        // Run PHP Code Sniffer, PHP Mess Detector, PHPStan as before
                         sh '''
-                        composer install --no-dev
-                        echo "Running Composer autoload dump..."
-                        composer dump-autoload
-                        echo "Running PHP Code Sniffer..."
-                        ./vendor/bin/phpcs --standard=PSR2 app/src/
-                        echo "Running PHP Code Sniffer fix..."
-                        ./vendor/bin/phpcbf --standard=PSR2 app/src/
-                        echo "Running PHP Mess Detector..."
-                        ./vendor/bin/phpmd app/src/ text codesize,unusedcode,naming
-                        echo "Running PHPStan..."
-                        ./vendor/bin/phpstan analyse app/src/ --level=5
-                        echo "Running PHPStan fix..."
-                        ./vendor/bin/phpstan analyse app/src/ --level=5 --error-format=checkstyle > reports/phpstan-checkstyle.xml
-                        echo "Running PHPStan report..."    
-                        echo "Running PHP syntax check..."
-                        find app/src/ -type f -name "*.php" -print0 | xargs -0 -n1 -P4 php -l
+                            ./vendor/bin/phpcs --standard=PSR2 app/src/
+                            ./vendor/bin/phpcbf --standard=PSR2 app/src/
+                            ./vendor/bin/phpmd app/src/ text codesize,unusedcode,naming
+                            ./vendor/bin/phpstan analyse app/src/ --level=5
                         '''
-                        slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check passed")
-                    } catch (e) {
-                        slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check failed")
-                        error "PHP lint check failed"
+
+                        // Run PHP lint check and capture output/errors
+                        def lintOutput = sh(script: 'find app/src/ -type f -name "*.php" -print0 | xargs -0 -n1 php -l', returnStdout: true).trim()
+
+                        // Check if there are any lint errors in the output
+                        if (lintOutput.contains("Errors parsing")) {
+                            echo "PHP lint errors found:\n${lintOutput}"
+                            slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check failed\n```" + lintOutput + "```")
+                            error "PHP lint check failed"
+                        } else {
+                            echo "PHP lint passed:\n${lintOutput}"
+                            slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check passed")
+                        }
+                    } catch (err) {
+                        // Catch any unexpected error
+                        slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: PHP lint check failed with error: ${err}")
+                        error "PHP lint check failed with exception"
                     }
                 }
             }
