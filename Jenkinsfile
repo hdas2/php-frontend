@@ -36,7 +36,6 @@ pipeline {
                     cd /applications/php-frontend
                     composer lint
                     echo "Running PHP lint check..."
-                    find app/ -name "*.php" -exec php -l {} \; > reports/php-lint-report.txt || true
                     '''
                     def lintReport = readFile('reports/php-lint-report.txt')
                     if (lintReport) {
