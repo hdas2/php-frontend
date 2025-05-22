@@ -165,65 +165,167 @@ pipeline {
         }
         
         stage('Trivy Filesystem Scan') {
-            steps {
-                script {
-                    try {
-                        // Run Trivy scan in the application directory and copy report to workspace
-                        sh '''
-                            cd /applications/php-frontend
-                            mkdir -p reports
-                            echo "Running Trivy filesystem scan..."
-                            trivy fs --scanners vuln,misconfig,secret --severity CRITICAL,HIGH --format json --output reports/trivy-fs-report.json app/
-                            cp reports/trivy-fs-report.json ${WORKSPACE}/trivy-fs-report.json
-                        '''
+    steps {
+        script {
+            try {
+                // Run Trivy scan in the application directory
+                sh '''
+                    cd /applications/php-frontend
+                    mkdir -p reports
+                    echo "Running Trivy filesystem scan..."
+                    trivy fs --scanners vuln,misconfig,secret \
+                        --severity CRITICAL,HIGH \
+                        --format json \
+                        --output reports/trivy-fs-report.json \
+                        --exit-code 0 \  # Don't fail immediately, we'll handle it below
+                        app/
+                    cp reports/trivy-fs-report.json ${WORKSPACE}/trivy-fs-report.json
+                '''
 
-                        // Read the report from Jenkins workspace
-                        def trivyReport = readJSON file: 'trivy-fs-report.json'
-                        def criticalCount = 0
-                        def highCount = 0
-                        def findings = []
+                // Parse the JSON report
+                def trivyReport = readJSON file: 'trivy-fs-report.json'
+                def criticalCount = 0
+                def highCount = 0
+                def findings = []
+                def misconfigurations = []
+                def secrets = []
 
-                        trivyReport.Results.each { result ->
-                            result.Vulnerabilities?.each { vuln ->
-                                if (vuln.Severity == "CRITICAL") criticalCount++
-                                if (vuln.Severity == "HIGH") highCount++
-                                findings << "${vuln.Severity}: ${vuln.VulnerabilityID} - ${vuln.Title}"
-                            }
+                // Process vulnerabilities
+                trivyReport.Results.each { result ->
+                    // Vulnerabilities
+                    result.Vulnerabilities?.each { vuln ->
+                        if (vuln.Severity == "CRITICAL") criticalCount++
+                        if (vuln.Severity == "HIGH") highCount++
+                        findings << [
+                            type: "VULNERABILITY",
+                            severity: vuln.Severity,
+                            id: vuln.VulnerabilityID,
+                            package: "${vuln.PkgName}@${vuln.InstalledVersion}",
+                            title: vuln.Title,
+                            fixed: vuln.FixedVersion ?: "Not fixed"
+                        ]
+                    }
+                    
+                    // Misconfigurations
+                    result.Misconfigurations?.each { misconfig ->
+                        if (["CRITICAL", "HIGH"].contains(misconfig.Severity)) {
+                            misconfigurations << [
+                                type: "MISCONFIGURATION",
+                                severity: misconfig.Severity,
+                                id: misconfig.ID,
+                                title: misconfig.Title,
+                                description: misconfig.Description,
+                                resolution: misconfig.Resolution
+                            ]
                         }
-
-                        def color = (criticalCount + highCount) > 0 ? 'danger' : 'good'
-                        def statusEmoji = (criticalCount + highCount) > 0 ? '❌' : '✅'
-
-                        def slackMessage = """
-                        ${statusEmoji} *Trivy Filesystem Scan Results* - ${env.JOB_NAME} #${env.BUILD_NUMBER}
-                        *Critical Findings:* ${criticalCount}
-                        *High Findings:* ${highCount}
-                        *Scan Target:* app/
-                        """
-
-                        if (findings) {
-                            slackMessage += "*Sample Findings:*\n${findings.take(5).join('\n')}"
-                            if (findings.size() > 5) {
-                                slackMessage += "\n_+ ${findings.size() - 5} more findings..._"
-                            }
+                    }
+                    
+                    // Secrets
+                    result.Secrets?.each { secret ->
+                        if (["CRITICAL", "HIGH"].contains(secret.Severity)) {
+                            secrets << [
+                                type: "SECRET",
+                                severity: secret.Severity,
+                                category: secret.Category,
+                                match: secret.Match,
+                                file: secret.File
+                            ]
                         }
+                    }
+                }
 
-                        slackSend(
-                            channel: SLACK_CHANNEL,
-                            color: color,
-                            message: slackMessage,
-                            failOnError: false
-                        )
+                // Prepare Slack message
+                def color = (criticalCount + highCount) > 0 ? 'danger' : 'good'
+                def statusEmoji = (criticalCount + highCount) > 0 ? '❌' : '✅'
 
-                        slackUploadFile(
-                            channel: SLACK_CHANNEL,
-                            filePath: 'trivy-fs-report.json',
-                            initialComment: "📦 Full Trivy Filesystem Scan Report"
-                        )
+                def slackMessage = """
+                ${statusEmoji} *Trivy Filesystem Scan Results* - ${env.JOB_NAME} #${env.BUILD_NUMBER}
+                *Scan Target:* `/applications/php-frontend/app`
+                *Critical Findings:* ${criticalCount}
+                *High Findings:* ${highCount}
+                *Total Issues Found:* ${findings.size() + misconfigurations.size() + secrets.size()}
+                """
 
-                        if (criticalCount > 0) {
-                            error "❌ Trivy found ${criticalCount} critical vulnerabilities"
-                        }
+                // Add findings summary
+                if (findings) {
+                    slackMessage += "\n*📦 Vulnerabilities Found:*\n"
+                    findings.take(3).each { finding ->
+                        slackMessage += "• *${finding.severity}*: ${finding.id} - ${finding.title}\n"
+                        slackMessage += "  _Package:_ ${finding.package}\n"
+                        slackMessage += "  _Fixed in:_ ${finding.fixed}\n"
+                    }
+                    if (findings.size() > 3) {
+                        slackMessage += `_+ ${findings.size() - 3} more vulnerabilities..._\n`
+                    }
+                }
+
+                if (misconfigurations) {
+                    slackMessage += "\n*⚙️ Misconfigurations Found:*\n"
+                    misconfigurations.take(2).each { misconfig ->
+                        slackMessage += "• *${misconfig.severity}*: ${misconfig.title}\n"
+                        slackMessage += "  _ID:_ ${misconfig.id}\n"
+                    }
+                    if (misconfigurations.size() > 2) {
+                        slackMessage += `_+ ${misconfigurations.size() - 2} more misconfigurations..._\n`
+                    }
+                }
+
+                if (secrets) {
+                    slackMessage += "\n*🔑 Secrets Found:*\n"
+                    secrets.take(1).each { secret ->
+                        slackMessage += "• *${secret.severity}*: ${secret.category}\n"
+                        slackMessage += "  _File:_ ${secret.file}\n"
+                    }
+                    if (secrets.size() > 1) {
+                        slackMessage += `_+ ${secrets.size() - 1} more secrets..._\n`
+                    }
+                }
+
+                // Send to Slack
+                slackSend(
+                    channel: SLACK_CHANNEL,
+                    color: color,
+                    message: slackMessage,
+                    failOnError: false
+                )
+
+                // Create a formatted markdown report for attachment
+                def markdownReport = """
+                # Trivy Filesystem Scan Report
+                **Build:** ${env.JOB_NAME} #${env.BUILD_NUMBER}
+                **Scan Date:** ${new Date().format("yyyy-MM-dd HH:mm:ss")}
+                **Target:** `/applications/php-frontend/app`
+
+                ## Summary
+                - Critical Findings: ${criticalCount}
+                - High Findings: ${highCount}
+                - Total Issues: ${findings.size() + misconfigurations.size() + secrets.size()}
+
+                ## Details
+                ${generateFindingsSection("Vulnerabilities", findings)}
+                ${generateFindingsSection("Misconfigurations", misconfigurations)}
+                ${generateFindingsSection("Secrets", secrets)}
+                """
+
+                writeFile file: 'trivy-fs-report.md', text: markdownReport
+                
+                // Upload both JSON and formatted markdown
+                slackUploadFile(
+                    channel: SLACK_CHANNEL,
+                    filePath: 'trivy-fs-report.json',
+                    initialComment: "Full JSON report"
+                )
+                
+                slackUploadFile(
+                    channel: SLACK_CHANNEL,
+                    filePath: 'trivy-fs-report.md',
+                    initialComment: "Formatted Markdown Report"
+                )
+
+                // Fail build if critical findings
+                if (criticalCount > 0) {
+                    error "❌ Trivy found ${criticalCount} critical vulnerabilities"
+                }
 
                     } catch (e) {
                         slackSend(
@@ -236,6 +338,32 @@ pipeline {
                     }
                 }
             }
+        }
+
+        // Helper function to generate findings sections
+        def generateFindingsSection(String title, List findings) {
+            if (!findings) return ""
+            
+            def section = """
+            ## ${title} (${findings.size()})
+            | Severity | ID | Description | Details |
+            |----------|----|-------------|---------|
+            """
+            
+            findings.each { finding ->
+                def details = ""
+                if (finding.type == "VULNERABILITY") {
+                    details = "Package: ${finding.package}\nFixed in: ${finding.fixed}"
+                } else if (finding.type == "MISCONFIGURATION") {
+                    details = "Resolution: ${finding.resolution}"
+                } else if (finding.type == "SECRET") {
+                    details = "File: ${finding.file}"
+                }
+                
+                section += "| ${finding.severity} | ${finding.id} | ${finding.title} | ${details} |\n"
+            }
+            
+            return section
         }
 
         stage('OWASP Dependency Check') {
