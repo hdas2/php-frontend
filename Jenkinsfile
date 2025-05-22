@@ -52,7 +52,7 @@ pipeline {
                 script {
                     try {
                         // Run SonarQube analysis
-                        withSonarQubeEnv('sonarqube') {
+                        withSonarQubeEnv('sonar-token') {
                             sh """
                             sonar-scanner \
                                 -Dsonar.projectKey=${APP_NAME} \
