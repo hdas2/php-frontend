@@ -19,6 +19,8 @@ pipeline {
         // Notification Configuration
         SLACK_CHANNEL = '#pipeline-notifications'
         SLACK_TOKEN = credentials('slack-jenkins-token')
+
+        TRIVY_PATH = '/usr/bin/trivy'
     }
     
     stages {
@@ -167,13 +169,23 @@ pipeline {
         stage('Scan with Trivy') {
             steps {
                 script {
-                    // Run Trivy scan and generate JSON report
-                    sh ''' /applications/php-frontend \
-                    trivy fs --security-checks vuln --format json --output trivy-report.json ./ '''
+                    // Run Trivy scan in the workspace directory
+                    sh """
+                        ${TRIVY_PATH} fs --security-checks vuln \
+                        --format json --output trivy-report.json .
+                    """
                     
-                    // Parse and send to Slack
-                    def report = readJSON file: 'trivy-report.json'
-                    sendTrivyReportToSlack(report)
+                    // Check if report was generated
+                    if (fileExists('trivy-report.json')) {
+                        def report = readJSON file: 'trivy-report.json'
+                        sendTrivyReportToSlack(report)
+                    } else {
+                        slackSend(
+                            channel: '#security-alerts',
+                            message: ':warning: Failed to generate Trivy scan report',
+                            color: 'warning'
+                        )
+                    }
                 }
             }
         }
