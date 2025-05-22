@@ -177,7 +177,7 @@ pipeline {
                         --severity CRITICAL,HIGH \
                         --format json \
                         --output reports/trivy-fs-report.json \
-                        --exit-code 0 \  # Don't fail immediately, we'll handle it below
+                        --exit-code 0 \
                         app/
                     cp reports/trivy-fs-report.json ${WORKSPACE}/trivy-fs-report.json
                 '''
