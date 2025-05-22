@@ -53,9 +53,9 @@ pipeline {
                             sh 'mkdir -p reports'
 
                             // Run analysis tools
-                            sh 'php vendor/squizlabs/php_codesniffer/bin/phpcs --standard=PSR12 app/src/ --report=checkstyle --report-file=reports/phpcs.xml || true'
-                            sh 'php vendor/phpmd/phpmd/src/bin/phpmd app/src/ text codesize,unusedcode,naming --reportfile reports/phpmd.xml || true'
-                            sh 'php vendor/phpstan/phpstan/bin/phpstan analyse app/src/ --level=5 --error-format=checkstyle > reports/phpstan.xml || true'
+                            sh 'php8 vendor/squizlabs/php_codesniffer/bin/phpcs --standard=PSR12 app/src/ --report=checkstyle --report-file=reports/phpcs.xml || true'
+                            sh 'php8 vendor/phpmd/phpmd/src/bin/phpmd app/src/ text codesize,unusedcode,naming --reportfile reports/phpmd.xml || true'
+                            sh 'php8 vendor/phpstan/phpstan/bin/phpstan analyse app/src/ --level=5 --error-format=checkstyle > reports/phpstan.xml || true'
 
                             // PHP lint check
                             def lintOutput = sh(script: 'find app/src/ -type f -name "*.php" -print0 | xargs -0 -n1 php -l', returnStdout: true).trim()
