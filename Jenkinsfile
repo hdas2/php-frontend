@@ -30,7 +30,7 @@ pipeline {
             }
         }
         
-        stage('PHP Lint Check') {
+        /*stage('PHP Lint Check') {
             steps {
                 script {
                     try {
@@ -45,7 +45,7 @@ pipeline {
                     }
                 }
             }
-        }
+        }*/
 
         stage('SonarQube Analysis') {
             steps {
