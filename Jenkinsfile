@@ -33,10 +33,7 @@ pipeline {
             steps {
                 script {
                     // Workaround for ClassLoader issues
-                    @NonCPS
-                    def safeSh(cmd) {
-                        return sh(script: cmd, returnStdout: true).trim()
-                    }
+                    def safeSh = { cmd -> sh(script: cmd, returnStdout: true).trim() }
 
                     try {
                         dir('/applications/php-frontend') {
