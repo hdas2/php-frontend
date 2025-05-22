@@ -1,0 +1,5 @@
+apiVersion: v2
+name: php-frontend
+description: A Helm chart for PHP 8 Frontend with Nginx
+version: 0.1.0
+appVersion: "1.0.0"

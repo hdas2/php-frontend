@@ -1,0 +1,91 @@
+replicaCount: 2
+
+image:
+  repository: your-ecr-repo/php-frontend
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: ""
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+  hosts:
+    - host: php-frontend.your-domain.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+# Add these to your existing values.yaml
+istio:
+  enabled: true
+  virtualService:
+    hosts:
+      - php-frontend.your-domain.com
+    gateways:
+      - istio-system/istio-gateway
+    trafficPolicy:
+      tls:
+        mode: ISTIO_MUTUAL
+  destinationRule:
+    trafficPolicy:
+      tls:
+        mode: ISTIO_MUTUAL
+    subsets:
+      - name: v1
+        labels:
+          version: v1
+      - name: v2
+        labels:
+          version: v2
+
+# Update service type to ClusterIP (required for Istio)
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: http
+
+  istio:
+  telemetry:
+    enabled: true
+    prometheus:
+      enabled: true
+    grafana:
+      enabled: true
+    kiali:
+      enabled: true
+    tracing:
+      enabled: true
+      provider: tempo

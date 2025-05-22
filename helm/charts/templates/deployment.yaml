@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "php-frontend.fullname" . }}
+  labels:
+    {{- include "php-frontend.labels" . | nindent 4 }}
+spec:
+  template:
+    metadata:
+      annotations:
+        {{- if .Values.istio.enabled }}
+        sidecar.istio.io/inject: "true"
+        sidecar.istio.io/rewriteAppHTTPProbers: "true"
+        {{- end }}
+      labels:
+        {{- include "php-frontend.selectorLabels" . | nindent 8 }}
+        {{- if .Values.istio.enabled }}
+        version: v1
+        {{- end }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          # ... existing container config ...
+          {{- if .Values.istio.enabled }}
+          # Istio-specific readiness/liveness probes
+          readinessProbe:
+            httpGet:
+              path: /index.php
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /index.php
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          {{- end }}

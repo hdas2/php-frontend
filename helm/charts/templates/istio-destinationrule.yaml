@@ -1,0 +1,14 @@
+{{- if .Values.istio.enabled }}
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: {{ include "php-frontend.fullname" . }}
+  labels:
+    {{- include "php-frontend.labels" . | nindent 4 }}
+spec:
+  host: {{ include "php-frontend.fullname" . }}
+  trafficPolicy:
+    {{- toYaml .Values.istio.destinationRule.trafficPolicy | nindent 4 }}
+  subsets:
+    {{- toYaml .Values.istio.destinationRule.subsets | nindent 4 }}
+{{- end }}
