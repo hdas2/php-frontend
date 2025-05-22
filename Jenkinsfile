@@ -170,7 +170,7 @@ pipeline {
             steps {
                 script {
                     // Run Trivy scan in the workspace directory
-                    sh """
+                    sh """ cd /applications/php-frontend &&
                         ${TRIVY_PATH} fs --security-checks vuln \
                         --format json --output trivy-report.json .
                     """
