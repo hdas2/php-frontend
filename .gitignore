@@ -3,7 +3,7 @@ vendor
 composer.lock
 reports
 venv
-dependency-test-report
+dependency-test-reports
 __pycache__
 *.py[cod]
 *.pyo
