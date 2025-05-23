@@ -200,80 +200,66 @@ pipeline {
             steps {
                 script {
                     try {
+                        def reportDir = "${WORKSPACE}/reports"
+
                         // Run dependency check
-                        sh '''
-                        cd /applications/php-frontend
-                        echo "Running OWASP Dependency Check..."
-                        dependency-check.sh --scan app --format HTML --format JSON --format XML --out reports/ --project ${APP_NAME}
-                        '''
-                        
-                        // Parse the JSON report
-                        def owaspReport = readJSON file: 'reports/dependency-check-report.json'
-                        def criticalCount = 0
-                        def highCount = 0
-                        def dependencies = [:]
-                        
-                        owaspReport.dependencies.each { dep ->
-                            dep.vulnerabilities?.each { vuln ->
-                                if (vuln.severity == "Critical") criticalCount++
-                                if (vuln.severity == "High") highCount++
-                                
-                                if (!dependencies.containsKey(dep.fileName)) {
-                                    dependencies[dep.fileName] = []
-                                }
-                                dependencies[dep.fileName] << "${vuln.severity}: ${vuln.name} (CVSS: ${vuln.cvssv3?.baseScore ?: vuln.cvssv2?.score})"
-                            }
-                        }
-                        
-                        // Format Slack message
-                        def color = (criticalCount + highCount) > 0 ? 'danger' : 'good'
-                        def statusEmoji = (criticalCount + highCount) > 0 ? '❌' : '✅'
-                        
-                        def slackMessage = """
-                        ${statusEmoji} *OWASP Dependency Check Results* - ${env.JOB_NAME} #${env.BUILD_NUMBER}
-                        *Critical Vulnerabilities:* ${criticalCount}
-                        *High Vulnerabilities:* ${highCount}
-                        *Scanned Dependencies:* ${owaspReport.dependencies.size()}
-                        """
-                        
-                        // Add sample vulnerable dependencies if any
-                        if (dependencies) {
-                            slackMessage += "*Vulnerable Dependencies:*\n"
-                            dependencies.each { dep, vulns ->
-                                if (vulns.any { it.contains('Critical') || it.contains('High') }) {
-                                    slackMessage += "• ${dep}:\n  - ${vulns.take(2).join('\n  - ')}\n"
-                                }
-                            }
-                        }
-                        
-                        // Send to Slack
-                        slackSend(
-                            channel: SLACK_CHANNEL, 
-                            color: color,
-                            message: slackMessage,
-                            failOnError: false
+                        def scanOutput = sh(
+                            script: """
+                            cd /applications/php-frontend
+                            dependency-check \\
+                                --scan app \\
+                                --format ALL \\
+                                --out ${reportDir} \\
+                                --project ${APP_NAME} \\
+                                --propertyfile dc.properties \\
+                                --disableRetireJS \\
+                                --log ${reportDir}/dependency-check.log \\
+                                --enableExperimental \\
+                                --prettyPrint
+                            """,
+                            returnStatus: true,
+                            returnStdout: true
                         )
-                        
-                        // Also upload HTML report
-                        slackUploadFile(
-                            channel: SLACK_CHANNEL,
-                            filePath: 'reports/dependency-check-report.html',
-                            initialComment: "Full OWASP Dependency Check Report"
-                        )
-                        
-                        // Fail if critical findings
-                        if (criticalCount > 0) {
-                            error "OWASP found ${criticalCount} critical vulnerabilities"
+
+                        // Read log content safely
+                        def logContent = "No log content available"
+                        if (fileExists("${reportDir}/dependency-check.log")) {
+                            logContent = readFile("${reportDir}/dependency-check.log")
+                            logContent = logContent.take(1000) // Limit to 1000 chars
                         }
-                        
-                    } catch (e) {
+
+                        // Check if JSON report exists
+                        if (!fileExists("${reportDir}/dependency-check-report.json")) {
+                            error """
+                            Dependency Check failed to generate report.
+                            Exit code: ${scanOutput instanceof Integer ? scanOutput : 'N/A'}
+                            Log content:
+                            ${logContent}
+                            """
+                        }
+
+                        // Read report JSON
+                        def owaspReport = readJSON file: "${reportDir}/dependency-check-report.json"
+                        processScanResults(owaspReport)
+
+                        // Publish JUnit results
+                        if (fileExists("${reportDir}/dependency-check-junit.xml")) {
+                            junit "${reportDir}/dependency-check-junit.xml"
+                        }
+
+                        // Archive all report artifacts
+                        archiveArtifacts artifacts: 'reports/**/*', fingerprint: true
+
+                    } catch (Exception e) {
                         slackSend(
-                            channel: SLACK_CHANNEL, 
+                            channel: env.SLACK_CHANNEL,
                             color: 'danger',
-                            message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: OWASP Dependency Check failed\nError: ${e.message}",
-                            failOnError: false
+                            message: """
+                            :alert: *OWASP Scan Failed* - ${env.JOB_NAME} #${env.BUILD_NUMBER}
+                            *Error*: ${e.message}
+                            """
                         )
-                        error "OWASP Dependency Check failed"
+                        error "OWASP Dependency Check failed: ${e.message}"
                     }
                 }
             }
@@ -447,4 +433,65 @@ def buildSlackMessage(report) {
 """
     
     return [color: color, text: text]
+}
+
+def processScanResults(owaspReport) {
+    // Count vulnerabilities
+    def vulnCounts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
+    def criticalFindings = []
+    
+    owaspReport.dependencies.each { dep ->
+        dep.vulnerabilities?.each { vuln ->
+            def severity = vuln.severity?.toUpperCase()
+            if (vulnCounts.containsKey(severity)) {
+                vulnCounts[severity]++
+                
+                if (severity in ['CRITICAL', 'HIGH']) {
+                    criticalFindings << [
+                        package: dep.fileName,
+                        severity: severity,
+                        name: vuln.name,
+                        cvss: vuln.cvssv3?.baseScore ?: vuln.cvssv2?.score ?: 'N/A'
+                    ]
+                }
+            }
+        }
+    }
+    
+    // Send Slack report
+    def color = vulnCounts.CRITICAL > 0 ? 'danger' : 
+               vulnCounts.HIGH > 0 ? 'warning' : 'good'
+    
+    def message = """
+    :shield: *OWASP Dependency Check Results* - ${env.JOB_NAME} #${env.BUILD_NUMBER}
+    *Critical*: ${vulnCounts.CRITICAL} :red_circle:
+    *High*: ${vulnCounts.HIGH} :large_orange_circle:
+    *Medium*: ${vulnCounts.MEDIUM} :yellow_circle:
+    *Low*: ${vulnCounts.LOW} :white_circle:
+    """
+    
+    if (criticalFindings) {
+        message += "\n*Critical Findings:*\n"
+        criticalFindings.take(3).each { finding ->
+            message += "• ${finding.package} - ${finding.severity} (CVSS ${finding.cvss})\n"
+        }
+    }
+    
+    slackSend(
+        channel: env.SLACK_CHANNEL,
+        color: color,
+        message: message
+    )
+    
+    // Upload full report
+    slackUploadFile(
+        channel: env.SLACK_CHANNEL,
+        filePath: "reports/dependency-check-report.html",
+        initialComment: "Full report for ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+    )
+    
+    // Fail build if critical vulnerabilities found
+    if (vulnCounts.CRITICAL > 0) {
+        error "Build failed: ${vulnCounts.CRITICAL} critical vulnerabilities found"
+    }
 }
