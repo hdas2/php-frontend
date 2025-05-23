@@ -25,7 +25,6 @@ pipeline {
         DB_URL = 'jdbc:postgresql://localhost:5432/dependencycheck'
         DB_USER = 'dcheck-user'
         DATA_DIR = "${WORKSPACE}/dc-data"
-        LOCK_TIMEOUT = '120' // 2 minute timeout
     }
     
     stages {
@@ -214,40 +213,7 @@ pipeline {
                 }
             }
         }
-        
-        stage('Initialize Database') {
-            steps {
-                script {
-                    try {
-                        // Initialize with longer timeout
-                        sh """
-                        dependency-check --updateonly \
-                            --connectionString "${DB_URL}" \
-                            --dbDriverName "org.postgresql.Driver" \
-                            --dbUser "${DB_USER}" \
-                            --dbPassword "${DB_PASSWORD}" \
-                            --data "${DATA_DIR}" \
-                            --log reports/db-init.log \
-                            --dbLockTimeout ${LOCK_TIMEOUT}
-                        """
-                        
-                        // Verify initialization
-                        if (!fileExists("${DATA_DIR}/odc.mv.db")) {
-                            error "Database initialization failed"
-                        }
-                        
-                    } catch (Exception e) {
-                        slackSend(
-                            channel: env.SLACK_CHANNEL,
-                            color: 'danger',
-                            message: ":alert: *DB Init Failed* - ${e.message}"
-                        )
-                        error "Database initialization failed"
-                    }
-                }
-            }
-        }
-        
+
         stage('Run Dependency Check') {
             steps {
                 script {
@@ -265,22 +231,15 @@ pipeline {
                                 script: """
                                 cd /applications/php-frontend
                                 dependency-check \
-                                    --scan app \
-                                    --format ALL \
-                                    --out ${WORKSPACE}/reports \
-                                    --project ${APP_NAME} \
-                                    --nvdApiKey ${NVD_API_KEY} \
-                                    --connectionString "${DB_URL}" \
-                                    --dbDriverName "org.postgresql.Driver" \
-                                    --dbUser "${DB_USER}" \
-                                    --dbPassword "${DB_PASSWORD}" \
-                                    --data "${DATA_DIR}" \
-                                    --disableRetireJS \
-                                    --log ${WORKSPACE}/reports/dc-scan.log \
-                                    --dbLockTimeout ${LOCK_TIMEOUT} \
-                                    --enableExperimental \
-                                    --prettyPrint \
-                                    --debug
+                                --scan app \
+                                --format ALL \
+                                --out ${WORKSPACE}/reports \
+                                --project ${APP_NAME} \
+                                --propertyfile dc.properties \
+                                --log ${WORKSPACE}/reports/dc-scan.log \
+                                --enableExperimental \
+                                --prettyPrint \
+                                --debug
                                 """,
                                 returnStatus: true
                             )

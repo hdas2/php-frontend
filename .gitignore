@@ -4,6 +4,7 @@ composer.lock
 reports
 venv
 dependency-test-reports
+dependency-check-reports
 __pycache__
 *.py[cod]
 *.pyo
