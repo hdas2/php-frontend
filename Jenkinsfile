@@ -24,8 +24,6 @@ pipeline {
         NVD_API_KEY = credentials('nvd_api_key')
         DB_URL = 'jdbc:postgresql://localhost:5432/dependencycheck'
         DB_USER = 'dcheck-user'
-        DB_PASSWORD = credentials('dependencycheck-db-password')
-        SLACK_CHANNEL = '#security-alerts'
         DATA_DIR = "${WORKSPACE}/dc-data"
         LOCK_TIMEOUT = '120' // 2 minute timeout
     }
