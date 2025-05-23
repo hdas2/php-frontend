@@ -169,22 +169,28 @@ pipeline {
         stage('Scan with Trivy') {
             steps {
                 script {
-                    // Run Trivy scan in the workspace directory
-                    sh """ cd /applications/php-frontend &&
-                        ${TRIVY_PATH} fs --security-checks vuln \
-                        --format json --output trivy-report.json .
-                    """
+                    // Run Trivy scan
+                    sh 'trivy fs --security-checks vuln --format json --output trivy-report.json .'
                     
-                    // Check if report was generated
-                    if (fileExists('trivy-report.json')) {
-                        def report = readJSON file: 'trivy-report.json'
-                        sendTrivyReportToSlack(report)
-                    } else {
+                    // Parse JSON (alternative if readJSON not available)
+                    def jsonText = readFile('trivy-report.json')
+                    def report = new groovy.json.JsonSlurper().parseText(jsonText)
+                    
+                    // Prepare message
+                    def message = buildSlackMessage(report)
+                    
+                    // Send to Slack with proper error handling
+                    try {
                         slackSend(
-                            channel: '#security-alerts',
-                            message: ':warning: Failed to generate Trivy scan report',
-                            color: 'warning'
+                            channel: env.SLACK_CHANNEL,
+                            color: message.color,
+                            message: message.text,
+                            tokenCredentialId: 'slack-jenkins-token',
+                            failOnError: true
                         )
+                    } catch (Exception e) {
+                        echo "Slack notification failed: ${e.getMessage()}"
+                        // Fallback notification or other error handling
                     }
                 }
             }
@@ -417,89 +423,28 @@ pipeline {
     }
 }
 
-def sendTrivyReportToSlack(report) {
+def buildSlackMessage(report) {
     // Count vulnerabilities by severity
-    def critical = 0
-    def high = 0
-    def medium = 0
-    def low = 0
+    def counts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
     
     report.Results.each { result ->
         result.Vulnerabilities?.each { vuln ->
-            switch(vuln.Severity) {
-                case 'CRITICAL': critical++; break
-                case 'HIGH': high++; break
-                case 'MEDIUM': medium++; break
-                case 'LOW': low++; break
-            }
+            counts[vuln.Severity] = (counts[vuln.Severity] ?: 0) + 1
         }
     }
     
-    // Prepare Slack message
-    def message = """
-*Trivy Scan Results* :shield:
-        
-:red_circle: *Critical*: ${critical}
-:large_orange_circle: *High*: ${high}
-:yellow_circle: *Medium*: ${medium}
-:white_circle: *Low*: ${low}
-        
-*Top Findings:*
-${getTopFindings(report, 3)}
+    // Determine message color
+    def color = counts.CRITICAL > 0 ? 'danger' : 
+               counts.HIGH > 0 ? 'warning' : 'good'
+    
+    // Build message text
+    def text = """
+*Trivy Vulnerability Scan Results* :shield:
+• :red_circle: *Critical*: ${counts.CRITICAL}
+• :large_orange_circle: *High*: ${counts.HIGH}
+• :yellow_circle: *Medium*: ${counts.MEDIUM}
+• :white_circle: *Low*: ${counts.LOW}
 """
     
-    // Send to Slack
-    slackSend(
-        channel: '#security-alerts',
-        message: message,
-        color: critical > 0 ? 'danger' : (high > 0 ? 'warning' : 'good')
-    )
-}
-
-def getTopFindings(report, limit) {
-    def findings = []
-    report.Results.each { result ->
-        result.Vulnerabilities?.each { vuln ->
-            findings << [
-                severity: vuln.Severity,
-                title: vuln.Title ?: vuln.VulnerabilityID,
-                package: "${vuln.PkgName}@${vuln.InstalledVersion}",
-                fixed: vuln.FixedVersion ?: 'No fix available'
-            ]
-        }
-    }
-    
-    // Sort by severity (critical first)
-    findings = findings.sort { -getSeverityWeight(it.severity) }
-    
-    // Format top findings
-    def formatted = []
-    findings.take(limit).eachWithIndex { finding, index ->
-        def emoji = getSeverityEmoji(finding.severity)
-        formatted << "${index+1}. ${emoji} *${finding.severity}*: ${finding.title}"
-        formatted << "   - Package: ${finding.package}"
-        formatted << "   - Fixed in: ${finding.fixed}"
-    }
-    
-    return formatted.join('\n')
-}
-
-def getSeverityWeight(severity) {
-    switch(severity) {
-        case 'CRITICAL': return 4
-        case 'HIGH': return 3
-        case 'MEDIUM': return 2
-        case 'LOW': return 1
-        default: return 0
-    }
-}
-
-def getSeverityEmoji(severity) {
-    switch(severity) {
-        case 'CRITICAL': return ':red_circle:'
-        case 'HIGH': return ':large_orange_circle:'
-        case 'MEDIUM': return ':yellow_circle:'
-        case 'LOW': return ':white_circle:'
-        default: return ':grey_question:'
-    }
+    return [color: color, text: text]
 }
