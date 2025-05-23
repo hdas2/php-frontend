@@ -21,6 +21,13 @@ pipeline {
         SLACK_TOKEN = credentials('slack-jenkins-token')
 
         TRIVY_PATH = '/usr/bin/trivy'
+        NVD_API_KEY = credentials('nvd_api_key')
+        DB_URL = 'jdbc:postgresql://localhost:5432/dependencycheck'
+        DB_USER = 'dcheck-user'
+        DB_PASSWORD = credentials('dependencycheck-db-password')
+        SLACK_CHANNEL = '#security-alerts'
+        DATA_DIR = "${WORKSPACE}/dc-data"
+        LOCK_TIMEOUT = '120' // 2 minute timeout
     }
     
     stages {
@@ -196,70 +203,111 @@ pipeline {
             }
         }
 
-        stage('OWASP Dependency Check') {
+        stage('Setup Environment') {
+            steps {
+                script {
+                    // Clean and create directories
+                    sh """
+                    rm -rf ${DATA_DIR}
+                    mkdir -p ${DATA_DIR}
+                    mkdir -p reports
+                    chmod -R 755 ${DATA_DIR}
+                    """
+                }
+            }
+        }
+        
+        stage('Initialize Database') {
             steps {
                 script {
                     try {
-                        def reportDir = "/applications/php-frontend/reports/dependency-test-reports"
-
-                        // Run dependency check
-                        def scanOutput = sh(
-                            script: """
-                            cd /applications/php-frontend
-                            dependency-check \\
-                                --scan app \\
-                                --format ALL \\
-                                --out ${reportDir} \\
-                                --project ${APP_NAME} \\
-                                --propertyfile dc.properties \\
-                                --disableRetireJS \\
-                                --log /applications/php-frontend/dependency-test-reports/dependency-check.log \\
-                                --enableExperimental \\
-                                --prettyPrint
-                            """,
-                            returnStatus: true,
-                            returnStdout: true
-                        )
-
-                        // Read log content safely
-                        def logContent = "No log content available"
-                        if (fileExists("${reportDir}/dependency-check.log")) {
-                            logContent = readFile("${reportDir}/dependency-check.log")
-                            logContent = logContent.take(1000) // Limit to 1000 chars
+                        // Initialize with longer timeout
+                        sh """
+                        dependency-check --updateonly \
+                            --connectionString "${DB_URL}" \
+                            --dbDriverName "org.postgresql.Driver" \
+                            --dbUser "${DB_USER}" \
+                            --dbPassword "${DB_PASSWORD}" \
+                            --data "${DATA_DIR}" \
+                            --log reports/db-init.log \
+                            --dbLockTimeout ${LOCK_TIMEOUT}
+                        """
+                        
+                        // Verify initialization
+                        if (!fileExists("${DATA_DIR}/odc.mv.db")) {
+                            error "Database initialization failed"
                         }
-
-                        // Check if JSON report exists
-                        if (!fileExists("${reportDir}/dependency-check-report.json")) {
-                            error """
-                            Dependency Check failed to generate report.
-                            Exit code: ${scanOutput instanceof Integer ? scanOutput : 'N/A'}
-                            Log content:
-                            ${logContent}
-                            """
-                        }
-
-                        // Read report JSON
-                        def owaspReport = readJSON file: "${reportDir}/dependency-check-report.json"
-                        processScanResults(owaspReport)
-
-                        // Publish JUnit results
-                        if (fileExists("${reportDir}/dependency-check-junit.xml")) {
-                            junit "${reportDir}/dependency-check-junit.xml"
-                        }
-
-                        // Archive all report artifacts
-                        archiveArtifacts artifacts: 'reports/**/*', fingerprint: true
-
+                        
                     } catch (Exception e) {
                         slackSend(
                             channel: env.SLACK_CHANNEL,
                             color: 'danger',
-                            message: """
-                            :alert: *OWASP Scan Failed* - ${env.JOB_NAME} #${env.BUILD_NUMBER}
-                            *Error*: ${e.message}
-                            """
+                            message: ":alert: *DB Init Failed* - ${e.message}"
                         )
-                        error "OWASP Dependency Check failed: ${e.message}"
+                        error "Database initialization failed"
+                    }
+                }
+            }
+        }
+        
+        stage('Run Dependency Check') {
+            steps {
+                script {
+                    try {
+                        // Run scan with lock timeout and retry
+                        def maxAttempts = 3
+                        def attempts = 0
+                        def success = false
+                        
+                        while (attempts < maxAttempts && !success) {
+                            attempts++
+                            echo "Attempt ${attempts} of ${maxAttempts}"
+                            
+                            def exitCode = sh(
+                                script: """
+                                cd /applications/php-frontend
+                                dependency-check \
+                                    --scan app \
+                                    --format ALL \
+                                    --out ${WORKSPACE}/reports \
+                                    --project ${APP_NAME} \
+                                    --nvdApiKey ${NVD_API_KEY} \
+                                    --connectionString "${DB_URL}" \
+                                    --dbDriverName "org.postgresql.Driver" \
+                                    --dbUser "${DB_USER}" \
+                                    --dbPassword "${DB_PASSWORD}" \
+                                    --data "${DATA_DIR}" \
+                                    --disableRetireJS \
+                                    --log ${WORKSPACE}/reports/dc-scan.log \
+                                    --dbLockTimeout ${LOCK_TIMEOUT} \
+                                    --enableExperimental \
+                                    --prettyPrint \
+                                    --debug
+                                """,
+                                returnStatus: true
+                            )
+                            
+                            if (exitCode == 0) {
+                                success = true
+                            } else {
+                                sleep(time: 30, unit: 'SECONDS') // Wait before retry
+                            }
+                        }
+                        
+                        if (!success) {
+                            error "Scan failed after ${maxAttempts} attempts"
+                        }
+                        
+                        // Process results
+                        processScanResults()
+                        
+                    } catch (Exception e) {
+                        slackSend(
+                            channel: env.SLACK_CHANNEL,
+                            color: 'danger',
+                            message: ":alert: *Scan Failed* - ${e.message}"
+                        )
+                        error "Scan failed: ${e.message}"
                     }
                 }
             }
@@ -435,19 +483,36 @@ def buildSlackMessage(report) {
     return [color: color, text: text]
 }
 
-def processScanResults(owaspReport) {
-    // Count vulnerabilities
-    def vulnCounts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
-    def criticalFindings = []
+def processScanResults() {
+    // Verify report exists
+    if (!fileExists("${WORKSPACE}/reports/dependency-check-report.json")) {
+        error "No report generated"
+    }
     
-    owaspReport.dependencies.each { dep ->
+    // Parse and analyze report
+    def report = readJSON file: "${WORKSPACE}/reports/dependency-check-report.json"
+    def (vulnCounts, findings) = analyzeReport(report)
+    
+    // Send notification
+    sendSlackReport(vulnCounts, findings)
+    
+    // Fail if critical vulnerabilities found
+    if (vulnCounts.CRITICAL > 0) {
+        error "${vulnCounts.CRITICAL} critical vulnerabilities found"
+    }
+}
+
+def analyzeReport(report) {
+    def counts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
+    def findings = []
+    
+    report.dependencies.each { dep ->
         dep.vulnerabilities?.each { vuln ->
             def severity = vuln.severity?.toUpperCase()
-            if (vulnCounts.containsKey(severity)) {
-                vulnCounts[severity]++
-                
+            if (counts.containsKey(severity)) {
+                counts[severity]++
                 if (severity in ['CRITICAL', 'HIGH']) {
-                    criticalFindings << [
+                    findings << [
                         package: dep.fileName,
                         severity: severity,
                         name: vuln.name,
@@ -458,40 +523,32 @@ def processScanResults(owaspReport) {
         }
     }
     
-    // Send Slack report
+    return [counts, findings.take(5)]
+}
+
+def sendSlackReport(vulnCounts, findings) {
     def color = vulnCounts.CRITICAL > 0 ? 'danger' : 
                vulnCounts.HIGH > 0 ? 'warning' : 'good'
     
     def message = """
-    :shield: *OWASP Dependency Check Results* - ${env.JOB_NAME} #${env.BUILD_NUMBER}
-    *Critical*: ${vulnCounts.CRITICAL} :red_circle:
-    *High*: ${vulnCounts.HIGH} :large_orange_circle:
-    *Medium*: ${vulnCounts.MEDIUM} :yellow_circle:
-    *Low*: ${vulnCounts.LOW} :white_circle:
+    *Dependency Check Results*
+    Critical: ${vulnCounts.CRITICAL} :red_circle:
+    High: ${vulnCounts.HIGH} :orange_circle:
+    Medium: ${vulnCounts.MEDIUM} :yellow_circle:
+    Low: ${vulnCounts.LOW} :white_circle:
     """
     
-    if (criticalFindings) {
-        message += "\n*Critical Findings:*\n"
-        criticalFindings.take(3).each { finding ->
-            message += "• ${finding.package} - ${finding.severity} (CVSS ${finding.cvss})\n"
+    if (findings) {
+        message += "\n*Top Findings:*\n"
+        findings.each { f ->
+            message += "• ${f.package} - ${f.severity} (CVSS ${f.cvss})\n"
         }
     }
     
     slackSend(
         channel: env.SLACK_CHANNEL,
         color: color,
-        message: message
+        message: message,
+        filePath: "${WORKSPACE}/reports/dependency-check-report.html"
     )
-    
-    // Upload full report
-    slackUploadFile(
-        channel: env.SLACK_CHANNEL,
-        filePath: "reports/dependency-check-report.html",
-        initialComment: "Full report for ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-    )
-    
-    // Fail build if critical vulnerabilities found
-    if (vulnCounts.CRITICAL > 0) {
-        error "Build failed: ${vulnCounts.CRITICAL} critical vulnerabilities found"
-    }
 }
