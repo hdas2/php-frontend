@@ -200,7 +200,7 @@ pipeline {
             steps {
                 script {
                     try {
-                        def reportDir = "${WORKSPACE}/reports"
+                        def reportDir = "/applications/php-frontend/reports/dependency-test-reports"
 
                         // Run dependency check
                         def scanOutput = sh(
@@ -213,7 +213,7 @@ pipeline {
                                 --project ${APP_NAME} \\
                                 --propertyfile dc.properties \\
                                 --disableRetireJS \\
-                                --log ${reportDir}/dependency-check.log \\
+                                --log /applications/php-frontend/dependency-test-reports/dependency-check.log \\
                                 --enableExperimental \\
                                 --prettyPrint
                             """,
