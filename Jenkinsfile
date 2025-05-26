@@ -200,71 +200,23 @@ pipeline {
             }
         }
 
-        stage('Setup Environment') {
-            steps {
-                script {
-                    // Clean and create directories
-                    sh """
-                    rm -rf ${DATA_DIR}
-                    mkdir -p ${DATA_DIR}
-                    mkdir -p reports
-                    chmod -R 755 ${DATA_DIR}
-                    """
-                }
-            }
-        }
-
-        stage('Run Dependency Check') {
+        stage('Dependency Check') {
             steps {
                 script {
                     try {
-                        // Run scan with lock timeout and retry
-                        def maxAttempts = 3
-                        def attempts = 0
-                        def success = false
+                        sh """
+                        cd /applications/php-frontend
+                        echo "Running Dependency Check..."
+                        dependency-check --project ${APP_NAME} --out reports --scan . --format JSON,HTML
+                        """
                         
-                        while (attempts < maxAttempts && !success) {
-                            attempts++
-                            echo "Attempt ${attempts} of ${maxAttempts}"
-                            
-                            def exitCode = sh(
-                                script: """
-                                cd /applications/php-frontend
-                                dependency-check \
-                                --scan app \
-                                --format ALL \
-                                --out ${WORKSPACE}/reports \
-                                --project ${APP_NAME} \
-                                --propertyfile dc.properties \
-                                --log ${WORKSPACE}/reports/dc-scan.log \
-                                --enableExperimental \
-                                --prettyPrint \
-                                --debug
-                                """,
-                                returnStatus: true
-                            )
-                            
-                            if (exitCode == 0) {
-                                success = true
-                            } else {
-                                sleep(time: 30, unit: 'SECONDS') // Wait before retry
-                            }
-                        }
-                        
-                        if (!success) {
-                            error "Scan failed after ${maxAttempts} attempts"
-                        }
-                        
-                        // Process results
+                        // Process the generated report
                         processScanResults()
                         
-                    } catch (Exception e) {
-                        slackSend(
-                            channel: env.SLACK_CHANNEL,
-                            color: 'danger',
-                            message: ":alert: *Scan Failed* - ${e.message}"
-                        )
-                        error "Scan failed: ${e.message}"
+                        slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Dependency Check completed successfully")
+                    } catch (e) {
+                        slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Dependency Check failed")
+                        error "Dependency Check failed"
                     }
                 }
             }
@@ -440,72 +392,3 @@ def buildSlackMessage(report) {
     return [color: color, text: text]
 }
 
-def processScanResults() {
-    // Verify report exists
-    if (!fileExists("${WORKSPACE}/reports/dependency-check-report.json")) {
-        error "No report generated"
-    }
-    
-    // Parse and analyze report
-    def report = readJSON file: "${WORKSPACE}/reports/dependency-check-report.json"
-    def (vulnCounts, findings) = analyzeReport(report)
-    
-    // Send notification
-    sendSlackReport(vulnCounts, findings)
-    
-    // Fail if critical vulnerabilities found
-    if (vulnCounts.CRITICAL > 0) {
-        error "${vulnCounts.CRITICAL} critical vulnerabilities found"
-    }
-}
-
-def analyzeReport(report) {
-    def counts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
-    def findings = []
-    
-    report.dependencies.each { dep ->
-        dep.vulnerabilities?.each { vuln ->
-            def severity = vuln.severity?.toUpperCase()
-            if (counts.containsKey(severity)) {
-                counts[severity]++
-                if (severity in ['CRITICAL', 'HIGH']) {
-                    findings << [
-                        package: dep.fileName,
-                        severity: severity,
-                        name: vuln.name,
-                        cvss: vuln.cvssv3?.baseScore ?: vuln.cvssv2?.score ?: 'N/A'
-                    ]
-                }
-            }
-        }
-    }
-    
-    return [counts, findings.take(5)]
-}
-
-def sendSlackReport(vulnCounts, findings) {
-    def color = vulnCounts.CRITICAL > 0 ? 'danger' : 
-               vulnCounts.HIGH > 0 ? 'warning' : 'good'
-    
-    def message = """
-    *Dependency Check Results*
-    Critical: ${vulnCounts.CRITICAL} :red_circle:
-    High: ${vulnCounts.HIGH} :orange_circle:
-    Medium: ${vulnCounts.MEDIUM} :yellow_circle:
-    Low: ${vulnCounts.LOW} :white_circle:
-    """
-    
-    if (findings) {
-        message += "\n*Top Findings:*\n"
-        findings.each { f ->
-            message += "• ${f.package} - ${f.severity} (CVSS ${f.cvss})\n"
-        }
-    }
-    
-    slackSend(
-        channel: env.SLACK_CHANNEL,
-        color: color,
-        message: message,
-        filePath: "${WORKSPACE}/reports/dependency-check-report.html"
-    )
-}
