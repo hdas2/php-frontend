@@ -274,7 +274,7 @@ pipeline {
                         sh """
                             mkdir -p ${reportDir}
                             mkdir -p ${dataDir}
-                            chmod -R 777 ${dataDir}
+                            sudo chmod -R 777 ${dataDir}
                         """
 
                         // Run Dependency Check
