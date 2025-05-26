@@ -260,37 +260,56 @@ pipeline {
         }*/
 
         stage('Dependency Check') {
-            steps {
-                script {
-                try {
-                    lock(resource: 'dependency-check-db') {
-                    def status = sh(
-                        script: """
-                        mkdir -p /tmp/dc-test-${BUILD_NUMBER}/reports
-                        dependency-check \
-                            --project test \
-                            --scan /applications/php-frontend \
-                            --out /tmp/dc-test-${BUILD_NUMBER}/reports \
-                            --format HTML \
-                            --nvdApiKey e11e9314-3e20-4a70-bd63-17d986f9c677 \
-                            --enableExperimental \
-                            --data /opt/dependency-check/data \
-                            --log /tmp/dc-test-${BUILD_NUMBER}/reports/dependency-check.log
-                        """,
-                        returnStatus: true
-                    )
-                    echo "Dependency-Check exit code: ${status}"
-                    if (status != 0) {
-                        error "Dependency Check failed"
-                    }
-                    }
-                } catch (e) {
-                    echo "Caught exception: ${e}"
-                    throw e
+        steps {
+            lock(resource: 'dependency-check-db') {
+            script {
+                def reportDir = "/applications/php-frontend/reports"
+                def dataDir = "/opt/dependency-check/data"
+
+                // Ensure directory exists and has proper permissions
+                sh "mkdir -p ${reportDir}"
+                sh "mkdir -p ${dataDir}"
+                sh "chmod -R 777 ${dataDir}"
+
+                def exitCode = sh(
+                script: """
+                    cd /applications/php-frontend
+                    dependency-check \
+                    --project php-frontend \
+                    --out ${reportDir} \
+                    --scan . \
+                    --format JSON \
+                    --format HTML \
+                    --nvdApiKey e11e9314-3e20-4a70-bd63-17d986f9c677 \
+                    --enableExperimental \
+                    --data ${dataDir} \
+                    --log ${reportDir}/dependency-check.log
+                """,
+                returnStatus: true
+                )
+
+                if (exitCode != 0) {
+                echo "Dependency Check failed. Exit Code: ${exitCode}"
+
+                if (fileExists("${reportDir}/dependency-check.log")) {
+                    def logContent = readFile("${reportDir}/dependency-check.log").take(1000)
+                    echo "Dependency Check log:\n${logContent}"
+                } else {
+                    echo "No log file found at ${reportDir}/dependency-check.log"
                 }
+
+                error "Dependency Check failed with exit code ${exitCode}"
+                }
+
+                // Verify reports were generated
+                if (!fileExists("${reportDir}/dependency-check-report.json") || !fileExists("${reportDir}/dependency-check-report.html")) {
+                error "Dependency Check reports not generated"
                 }
             }
             }
+        }
+        }
+
 
         stage('Build Docker Image') {
             steps {
