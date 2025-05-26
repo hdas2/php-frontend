@@ -204,7 +204,7 @@ pipeline {
             }
         }
 
-        /*stage('Dependency Check') {
+        stage('Dependency Check') {
             steps {
                 script {
                 try {
@@ -254,66 +254,6 @@ pipeline {
                     message: ":alert: *Dependency Check Failed* - ${e.message}"
                     )
                     error "Dependency Check failed: ${e.message}"
-                    }
-                }
-            }
-        }*/
-
-        stage('Dependency Check') {
-            steps {
-                lock(resource: 'dependency-check-db') {
-                    script {
-                        def appDir = "/applications/php-frontend"
-                        def reportDir = "${appDir}/reports"
-                        def dataDir = "/opt/dependency-check/data"
-                        def logFile = "${reportDir}/dependency-check.log"
-                        def jsonReport = "${reportDir}/dependency-check-report.json"
-                        def htmlReport = "${reportDir}/dependency-check-report.html"
-
-                        // Create required directories
-                        sh """
-                            mkdir -p ${reportDir}
-                            mkdir -p ${dataDir}
-                            sudo chmod -R 777 ${dataDir}
-                        """
-
-                        // Run Dependency Check
-                        def exitCode = sh(
-                            script: """
-                                cd ${appDir}
-                                dependency-check \
-                                --project php-frontend \
-                                --out ${reportDir} \
-                                --scan . \
-                                --format JSON \
-                                --format HTML \
-                                --nvdApiKey e11e9314-3e20-4a70-bd63-17d986f9c677 \
-                                --enableExperimental \
-                                --data ${dataDir} \
-                                --log ${logFile}
-                            """,
-                            returnStatus: true
-                        )
-
-                        // Check if Dependency Check failed
-                        if (exitCode != 0) {
-                            echo "Dependency Check failed with exit code ${exitCode}"
-
-                            if (fileExists(logFile)) {
-                                echo "Log snippet:\n" + readFile(logFile).take(1000)
-                            } else {
-                                echo "No dependency-check.log found at ${logFile}"
-                            }
-
-                            error "Dependency Check failed with exit code ${exitCode}"
-                        }
-
-                        // Verify that both reports exist
-                        if (!fileExists(jsonReport) || !fileExists(htmlReport)) {
-                            error "Dependency Check reports not generated."
-                        }
-
-                        echo "Dependency Check completed successfully."
                     }
                 }
             }
