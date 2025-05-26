@@ -432,14 +432,17 @@ def buildSlackMessage(report) {
 }
 
 
-
-// Depedency Check processing function
+// ** OWASP DEPENDENCY CHECK **
 def processScanResults() {
-    // Parse JSON report
-    def report = readJSON file: "${APP_DIR}/reports/dependency-check-report.json"
-    
-    // Count vulnerabilities
+    def reportPath = "${APP_DIR}/reports"
+    def jsonPath = "${reportPath}/dependency-check-report.json"
+    def csvPath = "${reportPath}/dependency-check-report.csv"
+    def htmlPath = "${reportPath}/dependency-check-report.html"
+
+    // Parse JSON report for vulnerability summary
+    def report = readJSON file: jsonPath
     def vulnCounts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
+
     report.dependencies.each { dep ->
         dep.vulnerabilities?.each { vuln ->
             def severity = vuln.severity?.toUpperCase()
@@ -448,11 +451,11 @@ def processScanResults() {
             }
         }
     }
-    
-    // Send Slack notification
+
+    // Slack notification with summary
     def color = vulnCounts.CRITICAL > 0 ? 'danger' : 
-               vulnCounts.HIGH > 0 ? 'warning' : 'good'
-    
+                vulnCounts.HIGH > 0 ? 'warning' : 'good'
+
     slackSend(
         channel: env.SLACK_CHANNEL,
         color: color,
@@ -462,11 +465,35 @@ def processScanResults() {
         High: ${vulnCounts.HIGH} :orange_circle:
         Medium: ${vulnCounts.MEDIUM} :yellow_circle:
         Low: ${vulnCounts.LOW} :white_circle:
-        """,
-        filePath: "${APP_DIR}/reports/dependency-check-report.html"
+        """
     )
-    
-    // Fail build if critical vulnerabilities found
+
+    // Send .csv file contents
+    if (fileExists(csvPath)) {
+        def csvContent = readFile(csvPath).take(3000) // Optional: truncate if too long
+        slackSend(
+            channel: env.SLACK_CHANNEL,
+            color: '#CCCCCC',
+            message: ":page_facing_up: *CSV Report Snippet:* \n```" + csvContent + "```"
+        )
+    } else {
+        echo "CSV file not found at ${csvPath}"
+    }
+
+    // Send .html file as attachment
+    if (fileExists(htmlPath)) {
+        slackUploadFile(
+            filePath: htmlPath,
+            filename: "dependency-check-report.html",
+            title: "Dependency-Check HTML Report",
+            initialComment: ":mag: HTML Report for *${env.JOB_NAME}*",
+            channel: env.SLACK_CHANNEL
+        )
+    } else {
+        echo "HTML report not found at ${htmlPath}"
+    }
+
+    // Fail the build if critical vulnerabilities are found
     if (vulnCounts.CRITICAL > 0) {
         error "Build failed: ${vulnCounts.CRITICAL} critical vulnerabilities found"
     }
