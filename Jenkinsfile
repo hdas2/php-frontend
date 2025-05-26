@@ -218,6 +218,7 @@ pipeline {
                             --scan . \
                             --format JSON \
                             --format HTML \
+                            --format CSV \
                             --nvdApiKey ${NVD_API_KEY} \
                             --enableExperimental \
                             --data /opt/dependency-check/data \
