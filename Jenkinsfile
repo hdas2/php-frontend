@@ -238,8 +238,8 @@ pipeline {
                     }
 
                     // Verify reports were generated
-                    if (!fileExists('${APP_DIR}/reports/dependency-check-report.json') || 
-                        !fileExists('${APP_DIR}/reports/dependency-check-report.html')) {
+                    if (!fileExists('applications/php-frontend/reports/dependency-check-report.json') || 
+                        !fileExists('applications/php-frontend/reports/dependency-check-report.html')) {
                         error "Dependency Check failed to generate reports"
                     }
                     }
