@@ -207,54 +207,45 @@ pipeline {
         stage('Dependency Check') {
             steps {
                 script {
-                try {
-                    lock(resource: 'dependency-check-db') {
-                    def exitCode = sh(
-                        script: """
-                        cd ${APP_DIR}
-                        dependency-check \
-                            --project php-frontend \
-                            --out ${APP_DIR}/reports \
-                            --scan . \
-                            --format JSON \
-                            --format HTML \
-                            --format CSV \
-                            --nvdApiKey ${NVD_API_KEY} \
-                            --enableExperimental \
-                            --data /opt/dependency-check/data \
-                            --log ${APP_DIR}/reports/dependency-check.log
-                        """,
-                        returnStatus: true
-                    )
+                    try {
+                        echo "🔍 Running OWASP Dependency Check..."
 
-                    if (exitCode != 0) {
-                        def logPath = "${APP_DIR}/reports/dependency-check.log"
-                        def logContent = fileExists(logPath) ? readFile(logPath).take(1000) : 'No log file available'
+                        def outputDir = "${APP_DIR}/reports"
+                        def jsonReport = "${outputDir}/dependency-check-report.json"
+                        def htmlReport = "${outputDir}/dependency-check-report.html"
+                        def logFile = "${outputDir}/dependency-check.log"
 
-                        error """
-                        Dependency Check failed with exit code ${exitCode}
-                        Log snippet:
-                        ${logContent}
+                        // Run the actual scan (example command — adjust based on your tool/integration)
+                        sh """
+                            dependency-check.sh \
+                                --project ${env.JOB_NAME} \
+                                --scan ${APP_DIR} \
+                                --out ${outputDir} \
+                                --format ALL \
+                                --log ${logFile}
                         """
-                    }
 
-                    // Verify reports were generated
-                    if (!fileExists('applications/php-frontend/reports/dependency-check-report.json') || 
-                        !fileExists('applications/php-frontend/reports/dependency-check-report.html')) {
-                        error "Dependency Check failed to generate reports"
-                    }
-                    }
+                        // Display report files for debugging
+                        echo "📂 Verifying reports at: ${outputDir}"
+                        sh "ls -l ${outputDir}"
 
-                    // Process and send results
-                    processScanResults()
+                        // Show log content if reports are missing
+                        if (!fileExists(jsonReport) || !fileExists(htmlReport)) {
+                            def logContent = fileExists(logFile) ? readFile(logFile).take(1000) : 'No log file available'
+                            echo "🛑 Dependency Check log:\n${logContent}"
+                            error "Dependency Check failed to generate required reports."
+                        }
 
-                } catch (Exception e) {
-                    slackSend(
-                    channel: env.SLACK_CHANNEL,
-                    color: 'danger',
-                    message: ":alert: *Dependency Check Failed* - ${e.message}"
-                    )
-                    error "Dependency Check failed: ${e.message}"
+                        // Process and send to Slack
+                        processScanResults(APP_DIR)
+
+                    } catch (Exception e) {
+                        slackSend(
+                            channel: env.SLACK_CHANNEL,
+                            color: 'danger',
+                            message: ":alert: *Dependency Check Failed* - ${e.message}"
+                        )
+                        error "Dependency Check failed: ${e.message}"
                     }
                 }
             }
@@ -432,19 +423,18 @@ def buildSlackMessage(report) {
 }
 
 
-// ** OWASP DEPENDENCY CHECK **
-def processScanResults() {
-    def reportPath = "${APP_DIR}/reports"
+// OWASP Dependency Check Report Processor
+def processScanResults(appDir) {
+    def reportPath = "${appDir}/reports"
     def jsonPath = "${reportPath}/dependency-check-report.json"
     def csvPath = "${reportPath}/dependency-check-report.csv"
     def htmlPath = "${reportPath}/dependency-check-report.html"
 
-    // Parse JSON report for vulnerability summary
     if (!fileExists(jsonPath)) {
-    error "Dependency Check JSON report not found at ${jsonPath}"
+        error "Dependency Check JSON report not found at ${jsonPath}"
     }
 
-    echo "Reading Dependency Check JSON report at: ${jsonPath}"
+    echo "📖 Reading Dependency Check report at ${jsonPath}"
     def report = readJSON file: jsonPath
     def vulnCounts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
 
@@ -457,49 +447,105 @@ def processScanResults() {
         }
     }
 
-    // Slack notification with summary
-    def color = vulnCounts.CRITICAL > 0 ? 'danger' : 
+    // Slack summary
+    def color = vulnCounts.CRITICAL > 0 ? 'danger' :
                 vulnCounts.HIGH > 0 ? 'warning' : 'good'
 
     slackSend(
         channel: env.SLACK_CHANNEL,
         color: color,
         message: """
-        :shield: *Dependency Check Results* - ${env.JOB_NAME}
-        Critical: ${vulnCounts.CRITICAL} :red_circle:
-        High: ${vulnCounts.HIGH} :orange_circle:
-        Medium: ${vulnCounts.MEDIUM} :yellow_circle:
-        Low: ${vulnCounts.LOW} :white_circle:
+        :shield: *Dependency Check Results* - `${env.JOB_NAME}`
+        *Critical:* ${vulnCounts.CRITICAL} :red_circle:
+        *High:* ${vulnCounts.HIGH} :orange_circle:
+        *Medium:* ${vulnCounts.MEDIUM} :yellow_circle:
+        *Low:* ${vulnCounts.LOW} :white_circle:
         """
     )
 
-    // Send .csv file contents
+    // Optional CSV snippet
     if (fileExists(csvPath)) {
-        def csvContent = readFile(csvPath).take(3000) // Optional: truncate if too long
+        def csvContent = readFile(csvPath).take(3000)
         slackSend(
             channel: env.SLACK_CHANNEL,
             color: '#CCCCCC',
             message: ":page_facing_up: *CSV Report Snippet:* \n```" + csvContent + "```"
         )
     } else {
-        echo "CSV file not found at ${csvPath}"
+        echo "CSV report not found at ${csvPath}"
     }
 
-    // Send .html file as attachment
+    // Attach HTML report
     if (fileExists(htmlPath)) {
         slackUploadFile(
             filePath: htmlPath,
             filename: "dependency-check-report.html",
-            title: "Dependency-Check HTML Report",
-            initialComment: ":mag: HTML Report for *${env.JOB_NAME}*",
+            title: "Dependency Check HTML Report",
+            initialComment: ":mag: HTML Report for `${env.JOB_NAME}`",
             channel: env.SLACK_CHANNEL
         )
     } else {
         echo "HTML report not found at ${htmlPath}"
     }
 
-    // Fail the build if critical vulnerabilities are found
+    // Optionally fail build on critical vulns
     if (vulnCounts.CRITICAL > 0) {
         error "Build failed: ${vulnCounts.CRITICAL} critical vulnerabilities found"
+    }
+}
+// Function to send file to Slack
+def slackUploadFile(filePath, filename, title, initialComment, channel) {
+    withCredentials([string(credentialsId: 'slack-jenkins-token', variable)]) {
+        sh """
+        curl -F file=@${filePath} \
+             -F "initial_comment=${initialComment}" \
+             -F "channels=${channel}" \
+             -F "title=${title}" \
+             -H "Authorization: Bearer ${SLACK_TOKEN}" \
+             https://slack.com/api/files.upload
+        """
+    }
+}
+// Function to read JSON file
+def readJSON(file) {
+    def jsonText = readFile(file)
+    return new groovy.json.JsonSlurper().parseText(jsonText)
+}
+// Function to send Slack message
+def slackSend(channel, color, message, failOnError = true) {
+    withCredentials([string(credentialsId: 'slack-jenkins-token', variable)]) {
+        sh """
+        curl -X POST -H 'Content-type: application/json' \
+             --data '{"channel": "${channel}", "text": "${message}", "attachments": [{"color": "${color}"}]}' \
+             -H "Authorization: Bearer ${SLACK_TOKEN}" \
+             https://slack.com/api/chat.postMessage
+        """
+    }
+    if (failOnError && currentBuild.result == 'FAILURE') {
+        error "Slack notification failed"
+    }
+}
+// Function to read file content
+def readFile(filePath) {
+    return sh(script: "cat ${filePath}", returnStdout: true).trim()
+}
+// Function to check if file exists
+def fileExists(filePath) {
+    return sh(script: "test -f ${filePath} && echo 'true' || echo 'false'", returnStdout: true).trim() == 'true'
+}
+// Function to send Slack message with file upload
+def slackUploadFile(filePath, filename, title, initialComment, channel) {
+    withCredentials([string(credentialsId: 'slack-jenkins-token', variable)]) {
+        sh """
+        curl -F file=@${filePath} \
+             -F "initial_comment=${initialComment}" \
+             -F "channels=${channel}" \
+             -F "title=${title}" \
+             -H "Authorization: Bearer ${SLACK_TOKEN}" \
+             https://slack.com/api/files.upload
+        """
+    }
+    if (currentBuild.result == 'FAILURE') {
+        error "Slack file upload failed"
     }
 }
