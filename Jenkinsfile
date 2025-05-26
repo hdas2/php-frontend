@@ -25,6 +25,7 @@ pipeline {
         DB_URL = 'jdbc:postgresql://localhost:5432/dependencycheck'
         DB_USER = 'dcheck-user'
         DATA_DIR = "${WORKSPACE}/dc-data"
+        APP_DIR = '/applications/php-frontend'
     }
     
     stages {
@@ -204,19 +205,54 @@ pipeline {
             steps {
                 script {
                     try {
-                        sh """
-                        cd /applications/php-frontend
-                        echo "Running Dependency Check..."
-                        dependency-check --project ${APP_NAME} --out reports --scan . --format JSON,HTML
-                        """
+                        // Create reports directory
+                        sh 'mkdir -p reports'
                         
-                        // Process the generated report
+                        // Run Dependency Check with correct format specification
+                        def exitCode = sh(
+                            script: """
+                            cd /applications/php-frontend
+                            dependency-check \
+                                --project ${APP_NAME} \
+                                --out ${APP_DIR}/reports \
+                                --scan . \
+                                --format JSON \
+                                --format HTML \
+                                --nvdApiKey ${NVD_API_KEY} \
+                                --enableExperimental \
+                                --log ${APP_DIR}/reports/dependency-check.log
+                            """,
+                            returnStatus: true
+                        )
+                        
+                        // Verify execution
+                        if (exitCode != 0) {
+                            def logContent = fileExists("${APP_DIR}/reports/dependency-check.log") ? 
+                                readFile("${APP_DIR}/reports/dependency-check.log").take(1000) : 
+                                'No log file available'
+                            error """
+                            Dependency Check failed with exit code ${exitCode}
+                            Log snippet:
+                            ${logContent}
+                            """
+                        }
+                        
+                        // Verify reports were generated
+                        if (!fileExists("${APP_DIR}/reports/dependency-check-report.json") || 
+                            !fileExists("${APP_DIR}/reports/dependency-check-report.html")) {
+                            error "Dependency Check failed to generate reports"
+                        }
+                        
+                        // Process and send results
                         processScanResults()
                         
-                        slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Dependency Check completed successfully")
-                    } catch (e) {
-                        slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Dependency Check failed")
-                        error "Dependency Check failed"
+                    } catch (Exception e) {
+                        slackSend(
+                            channel: env.SLACK_CHANNEL,
+                            color: 'danger',
+                            message: ":alert: *Dependency Check Failed* - ${e.message}"
+                        )
+                        error "Dependency Check failed: ${e.message}"
                     }
                 }
             }
@@ -366,6 +402,7 @@ pipeline {
     }
 }
 
+// Function to build Slack message from Trivy report
 def buildSlackMessage(report) {
     // Count vulnerabilities by severity
     def counts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
@@ -392,3 +429,43 @@ def buildSlackMessage(report) {
     return [color: color, text: text]
 }
 
+
+
+// Depedency Check processing function
+def processScanResults() {
+    // Parse JSON report
+    def report = readJSON file: "${APP_DIR}/reports/dependency-check-report.json"
+    
+    // Count vulnerabilities
+    def vulnCounts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
+    report.dependencies.each { dep ->
+        dep.vulnerabilities?.each { vuln ->
+            def severity = vuln.severity?.toUpperCase()
+            if (vulnCounts.containsKey(severity)) {
+                vulnCounts[severity]++
+            }
+        }
+    }
+    
+    // Send Slack notification
+    def color = vulnCounts.CRITICAL > 0 ? 'danger' : 
+               vulnCounts.HIGH > 0 ? 'warning' : 'good'
+    
+    slackSend(
+        channel: env.SLACK_CHANNEL,
+        color: color,
+        message: """
+        :shield: *Dependency Check Results* - ${env.JOB_NAME}
+        Critical: ${vulnCounts.CRITICAL} :red_circle:
+        High: ${vulnCounts.HIGH} :orange_circle:
+        Medium: ${vulnCounts.MEDIUM} :yellow_circle:
+        Low: ${vulnCounts.LOW} :white_circle:
+        """,
+        filePath: "${APP_DIR}/reports/dependency-check-report.html"
+    )
+    
+    // Fail build if critical vulnerabilities found
+    if (vulnCounts.CRITICAL > 0) {
+        error "Build failed: ${vulnCounts.CRITICAL} critical vulnerabilities found"
+    }
+}
