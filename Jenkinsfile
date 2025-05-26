@@ -209,23 +209,26 @@ pipeline {
                         sh 'mkdir -p reports'
                         
                         // Run Dependency Check with correct format specification
-                        def exitCode = sh(
-                            script: """
-                            cd /applications/php-frontend
-                            dependency-check \
-                            --project php-frontend \
-                            --out /applications/php-frontend/reports \
-                            --scan . \
-                            --format JSON \
-                            --format HTML \
-                            --nvdApiKey e11e9314-3e20-4a70-bd63-17d986f9c677 \
-                            --enableExperimental \
-                            --data /tmp/dc-data-${BUILD_NUMBER} \
-                            --log /applications/php-frontend/reports/dependency-check.log
-                            """,
-                            returnStatus: true
-                        )
-                        
+                        lock(resource: 'dependency-check-db') {
+                            def exitCode = sh(
+                                script: """
+                                cd ${APP_DIR} \
+                                echo "Running Dependency Check..."
+                                dependency-check \
+                                --project php-frontend \
+                                --out ${APP_DIR}/reports \
+                                --scan . \
+                                --format JSON \
+                                --format HTML \
+                                --nvdApiKey ${NVD_API_KEY} \
+                                --enableExperimental \
+                                --data /opt/dependency-check/data \
+                                --log ${APP_DIR}/reports/dependency-check.log
+                                """,
+                                returnStatus: true
+                            )
+                        }
+            
                         // Verify execution
                         if (exitCode != 0) {
                             def logContent = fileExists("${APP_DIR}/reports/dependency-check.log") ? 
