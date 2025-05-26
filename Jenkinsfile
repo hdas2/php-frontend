@@ -440,6 +440,11 @@ def processScanResults() {
     def htmlPath = "${reportPath}/dependency-check-report.html"
 
     // Parse JSON report for vulnerability summary
+    if (!fileExists(jsonPath)) {
+    error "Dependency Check JSON report not found at ${jsonPath}"
+    }
+
+    echo "Reading Dependency Check JSON report at: ${jsonPath}"
     def report = readJSON file: jsonPath
     def vulnCounts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
 
