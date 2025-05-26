@@ -213,14 +213,15 @@ pipeline {
                             script: """
                             cd /applications/php-frontend
                             dependency-check \
-                                --project ${APP_NAME} \
-                                --out ${APP_DIR}/reports \
-                                --scan . \
-                                --format JSON \
-                                --format HTML \
-                                --nvdApiKey ${NVD_API_KEY} \
-                                --enableExperimental \
-                                --log ${APP_DIR}/reports/dependency-check.log
+                            --project php-frontend \
+                            --out /applications/php-frontend/reports \
+                            --scan . \
+                            --format JSON \
+                            --format HTML \
+                            --nvdApiKey e11e9314-3e20-4a70-bd63-17d986f9c677 \
+                            --enableExperimental \
+                            --data /tmp/dc-data-${BUILD_NUMBER} \
+                            --log /applications/php-frontend/reports/dependency-check.log
                             """,
                             returnStatus: true
                         )
