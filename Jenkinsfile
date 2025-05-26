@@ -1,5 +1,8 @@
 pipeline {
     agent any 
+    options {
+    disableConcurrentBuilds()
+    }
     environment {
         // Application Configuration
         APP_NAME = '-php-frontend'
@@ -204,64 +207,58 @@ pipeline {
         stage('Dependency Check') {
             steps {
                 script {
-                    try {
-                        // Create reports directory
-                        sh 'mkdir -p reports'
-                        
-                        // Run Dependency Check with correct format specification
-                        lock(resource: 'dependency-check-db') {
-                            def exitCode = sh(
-                                script: """
-                                cd ${APP_DIR} \
-                                echo "Running Dependency Check..."
-                                dependency-check \
-                                --project php-frontend \
-                                --out ${APP_DIR}/reports \
-                                --scan . \
-                                --format JSON \
-                                --format HTML \
-                                --nvdApiKey ${NVD_API_KEY} \
-                                --enableExperimental \
-                                --data /opt/dependency-check/data \
-                                --log ${APP_DIR}/reports/dependency-check.log
-                                """,
-                                returnStatus: true
-                            )
-                        }
-            
-                        // Verify execution
-                        if (exitCode != 0) {
-                            def logContent = fileExists("${APP_DIR}/reports/dependency-check.log") ? 
-                                readFile("${APP_DIR}/reports/dependency-check.log").take(1000) : 
-                                'No log file available'
-                            error """
-                            Dependency Check failed with exit code ${exitCode}
-                            Log snippet:
-                            ${logContent}
-                            """
-                        }
-                        
-                        // Verify reports were generated
-                        if (!fileExists("${APP_DIR}/reports/dependency-check-report.json") || 
-                            !fileExists("${APP_DIR}/reports/dependency-check-report.html")) {
-                            error "Dependency Check failed to generate reports"
-                        }
-                        
-                        // Process and send results
-                        processScanResults()
-                        
-                    } catch (Exception e) {
-                        slackSend(
-                            channel: env.SLACK_CHANNEL,
-                            color: 'danger',
-                            message: ":alert: *Dependency Check Failed* - ${e.message}"
-                        )
-                        error "Dependency Check failed: ${e.message}"
+                try {
+                    lock(resource: 'dependency-check-db') {
+                    def exitCode = sh(
+                        script: """
+                        cd ${APP_DIR}
+                        dependency-check \
+                            --project php-frontend \
+                            --out ${APP_DIR}/reports \
+                            --scan . \
+                            --format JSON \
+                            --format HTML \
+                            --nvdApiKey ${NVD_API_KEY} \
+                            --enableExperimental \
+                            --data /opt/dependency-check/data \
+                            --log ${APP_DIR}/reports/dependency-check.log
+                        """,
+                        returnStatus: true
+                    )
+
+                    if (exitCode != 0) {
+                        def logPath = "${APP_DIR}/reports/dependency-check.log"
+                        def logContent = fileExists(logPath) ? readFile(logPath).take(1000) : 'No log file available'
+
+                        error """
+                        Dependency Check failed with exit code ${exitCode}
+                        Log snippet:
+                        ${logContent}
+                        """
+                    }
+
+                    // Verify reports were generated
+                    if (!fileExists('${APP_DIR}/reports/dependency-check-report.json') || 
+                        !fileExists('${APP_DIR}/reports/dependency-check-report.html')) {
+                        error "Dependency Check failed to generate reports"
+                    }
+                    }
+
+                    // Process and send results
+                    processScanResults()
+
+                } catch (Exception e) {
+                    slackSend(
+                    channel: env.SLACK_CHANNEL,
+                    color: 'danger',
+                    message: ":alert: *Dependency Check Failed* - ${e.message}"
+                    )
+                    error "Dependency Check failed: ${e.message}"
                     }
                 }
             }
         }
-        
+
         stage('Build Docker Image') {
             steps {
                 script {
