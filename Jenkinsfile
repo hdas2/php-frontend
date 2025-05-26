@@ -204,7 +204,7 @@ pipeline {
             }
         }
 
-        stage('Dependency Check') {
+        /*stage('Dependency Check') {
             steps {
                 script {
                 try {
@@ -257,7 +257,40 @@ pipeline {
                     }
                 }
             }
-        }
+        }*/
+
+        stage('Dependency Check') {
+            steps {
+                script {
+                try {
+                    lock(resource: 'dependency-check-db') {
+                    def status = sh(
+                        script: """
+                        mkdir -p /tmp/dc-test-${BUILD_NUMBER}/reports
+                        dependency-check \
+                            --project test \
+                            --scan /applications/php-frontend \
+                            --out /tmp/dc-test-${BUILD_NUMBER}/reports \
+                            --format HTML \
+                            --nvdApiKey e11e9314-3e20-4a70-bd63-17d986f9c677 \
+                            --enableExperimental \
+                            --data /opt/dependency-check/data \
+                            --log /tmp/dc-test-${BUILD_NUMBER}/reports/dependency-check.log
+                        """,
+                        returnStatus: true
+                    )
+                    echo "Dependency-Check exit code: ${status}"
+                    if (status != 0) {
+                        error "Dependency Check failed"
+                    }
+                    }
+                } catch (e) {
+                    echo "Caught exception: ${e}"
+                    throw e
+                }
+                }
+            }
+            }
 
         stage('Build Docker Image') {
             steps {
