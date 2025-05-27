@@ -372,7 +372,9 @@ pipeline {
                         """
 
                         // Parse summary from JSON
-                        def trivyReport = readJSON file: '${APP_DIR}/trivy-image-report.json'
+                        sh "cp ${APP_DIR}/trivy-image-report.json ./trivy-image-report.json"
+                        sh "cp ${APP_DIR}/trivy-image-report.txt ./trivy-image-report.txt"
+                        def trivyReport = readJSON file: 'trivy-image-report.json'
                         if (!trivyReport.Results || trivyReport.Results.isEmpty()) {
                             slackSend(
                                 channel: SLACK_CHANNEL,
@@ -416,7 +418,7 @@ pipeline {
                         // Upload full report
                         slackUploadFile(
                             channel: SLACK_CHANNEL,
-                            filePath: '${APP_DIR}/trivy-image-report.txt',
+                            filePath: 'trivy-image-report.txt',
                             initialComment: "📄 *Full Trivy Report* for ${env.JOB_NAME} #${env.BUILD_NUMBER}"
                         )
 
