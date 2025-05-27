@@ -208,7 +208,7 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Run Dependency Check
+                        // Run Dependency Check (generate CSV and HTML)
                         sh '''
                         mkdir -p reports
                         cd /applications/php-frontend
@@ -222,63 +222,59 @@ pipeline {
                             --log ${WORKSPACE}/reports/dependency-check.log
                         '''
 
-                        // Helper method to safely truncate strings
-                        def trunc = { str, n ->
-                            return (str?.size() > n) ? str.take(n - 3) + '...' : str
-                        }
-
-                        // Read and process results
-                        def report = readJSON file: "${WORKSPACE}/reports/dependency-check-report.json"
-
-                        def vulnCounts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
+                        // Parse CSV
+                        def reportRows = readCSV file: "${WORKSPACE}/reports/dependency-check-report.csv"
+                        def severityCount = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
                         def findings = []
 
-                        report.dependencies.each { dep ->
-                            dep.vulnerabilities?.each { vuln ->
-                                def severity = vuln.severity?.toUpperCase()
-                                if (vulnCounts.containsKey(severity)) {
-                                    vulnCounts[severity]++
-                                    findings << [
-                                        severity: severity,
-                                        package: dep.fileName,
-                                        cve: vuln.name,
-                                        cvss: vuln.cvssv3?.baseScore ?: vuln.cvssv2?.score ?: 0,
-                                        description: vuln.description?.replace('\n', ' ') ?: 'No description'
-                                    ]
-                                }
+                        reportRows.each { row ->
+                            def sev = row['CVSSv3_BaseSeverity']?.toUpperCase()
+                            if (sev in ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']) {
+                                severityCount[sev] = (severityCount[sev] ?: 0) + 1
+                                findings << [
+                                    severity: sev,
+                                    package: row['DependencyName'] + ':' + row['Version'],
+                                    cve: row['CVE'],
+                                    score: row['CVSSv3_BaseScore'] ?: row['CVSSv2_Score'] ?: 'N/A',
+                                    description: row['ShortDescription']?.take(30) ?: 'No description'
+                                ]
                             }
                         }
 
-                        // Format Slack table
-                        def tableHeader = "| Severity  | Package (truncated) | CVE ID       | CVSS | Description (truncated) |\n" +
-                                        "|-----------|---------------------|--------------|------|--------------------------|"
-
-                        def tableRows = findings.sort { -it.cvss }.take(10).collect { finding ->
-                            "| ${finding.severity.padRight(8)} | ${trunc(finding.package, 20).padRight(19)} | ${trunc(finding.cve, 12).padRight(12)} | ${finding.cvss.toString().padRight(4)} | ${trunc(finding.description, 24).padRight(24)} |"
+                        // Format top 10 into a Markdown-style table
+                        def top10 = findings.sort { -it.score.toString().toFloat() }.take(10)
+                        def tableHeader = "| Severity | Package           | CVE ID       | Score | Description              |\n" +
+                                        "|----------|-------------------|--------------|-------|--------------------------|"
+                        def tableRows = top10.collect {
+                            "| ${it.severity.padRight(8)} | ${it.package.take(17).padRight(17)} | ${it.cve.take(12).padRight(12)} | ${it.score.toString().padRight(5)} | ${it.description.take(24).padRight(24)} |"
                         }.join("\n")
 
-                        def fullTable = "```\n${tableHeader}\n${tableRows}\n```"
+                        def slackMessage = """
+                        *Dependency Check Summary for ${APP_NAME}*
 
-                        // Send report to Slack
+                        :rotating_light: *Critical*: ${severityCount.CRITICAL ?: 0}
+                        :large_orange_circle: *High*: ${severityCount.HIGH ?: 0}
+                        :yellow_circle: *Medium*: ${severityCount.MEDIUM ?: 0}
+                        :white_circle: *Low*: ${severityCount.LOW ?: 0}
+
+                        *Top 10 Vulnerabilities:*
+                        ```
+                        ${tableHeader}
+                        ${tableRows}
+                        ```
+                        """
+
                         slackSend(
                             channel: env.SLACK_CHANNEL,
-                            color: vulnCounts.CRITICAL > 0 ? 'danger' : (vulnCounts.HIGH > 0 ? 'warning' : 'good'),
-                            message: """
-                            *Dependency Check Results for ${APP_NAME}*
-                            :red_circle: *Critical*: ${vulnCounts.CRITICAL}  
-                            :large_orange_circle: *High*: ${vulnCounts.HIGH}  
-                            :yellow_circle: *Medium*: ${vulnCounts.MEDIUM}  
-                            :white_circle: *Low*: ${vulnCounts.LOW}
-                            
-                            *Top 10 Vulnerabilities by CVSS Score*
-                            ${fullTable}
-                            """,
+                            color: severityCount.CRITICAL > 0 ? 'danger' :
+                                severityCount.HIGH > 0 ? 'warning' : 'good',
+                            message: slackMessage,
                             filePath: "${WORKSPACE}/reports/dependency-check-report.html"
                         )
 
-                        // Fail the build if critical issues exist
-                        if (vulnCounts.CRITICAL > 0) {
-                            error "Build failed: ${vulnCounts.CRITICAL} critical vulnerabilities found"
+                        // Fail if critical vulnerabilities found
+                        if ((severityCount.CRITICAL ?: 0) > 0) {
+                            error "Build failed: ${severityCount.CRITICAL} critical vulnerabilities found"
                         }
 
                     } catch (Exception e) {
