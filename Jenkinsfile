@@ -221,14 +221,18 @@ pipeline {
                             --nvdApiKey ${NVD_API_KEY} \
                             --log ${WORKSPACE}/reports/dependency-check.log
                         '''
-                        
-                        // Process and send results
+
+                        // Helper method to safely truncate strings
+                        def trunc = { str, n ->
+                            return (str?.size() > n) ? str.take(n - 3) + '...' : str
+                        }
+
+                        // Read and process results
                         def report = readJSON file: "${WORKSPACE}/reports/dependency-check-report.json"
-                        
-                        // Count vulnerabilities and collect findings
+
                         def vulnCounts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
                         def findings = []
-                        
+
                         report.dependencies.each { dep ->
                             dep.vulnerabilities?.each { vuln ->
                                 def severity = vuln.severity?.toUpperCase()
@@ -238,25 +242,24 @@ pipeline {
                                         severity: severity,
                                         package: dep.fileName,
                                         cve: vuln.name,
-                                        cvss: vuln.cvssv3?.baseScore ?: vuln.cvssv2?.score ?: 'N/A',
-                                        description: vuln.description?.take(100)?.replace('\n', ' ') ?: 'No description'
+                                        cvss: vuln.cvssv3?.baseScore ?: vuln.cvssv2?.score ?: 0,
+                                        description: vuln.description?.replace('\n', ' ') ?: 'No description'
                                     ]
                                 }
                             }
                         }
-                        
-                        // Format as Slack table
+
+                        // Format Slack table
                         def tableHeader = "| Severity  | Package (truncated) | CVE ID       | CVSS | Description (truncated) |\n" +
-                                         "|-----------|---------------------|--------------|------|--------------------------|"
-                        
+                                        "|-----------|---------------------|--------------|------|--------------------------|"
+
                         def tableRows = findings.sort { -it.cvss }.take(10).collect { finding ->
-                            String.metaClass.trunc = { n -> delegate.size() > n ? delegate.take(n-3) + '...' : delegate }
-                            "| ${finding.severity.padRight(8)} | ${finding.package.trunc(20).padRight(19)} | ${finding.cve?.trunc(12)?.padRight(12)} | ${finding.cvss.toString().padRight(4)} | ${finding.description.trunc(24).padRight(24)} |"
+                            "| ${finding.severity.padRight(8)} | ${trunc(finding.package, 20).padRight(19)} | ${trunc(finding.cve, 12).padRight(12)} | ${finding.cvss.toString().padRight(4)} | ${trunc(finding.description, 24).padRight(24)} |"
                         }.join("\n")
-                        
+
                         def fullTable = "```\n${tableHeader}\n${tableRows}\n```"
-                        
-                        // Send to Slack
+
+                        // Send report to Slack
                         slackSend(
                             channel: env.SLACK_CHANNEL,
                             color: vulnCounts.CRITICAL > 0 ? 'danger' : (vulnCounts.HIGH > 0 ? 'warning' : 'good'),
@@ -272,12 +275,12 @@ pipeline {
                             """,
                             filePath: "${WORKSPACE}/reports/dependency-check-report.html"
                         )
-                        
-                        // Fail build if critical vulnerabilities found
+
+                        // Fail the build if critical issues exist
                         if (vulnCounts.CRITICAL > 0) {
                             error "Build failed: ${vulnCounts.CRITICAL} critical vulnerabilities found"
                         }
-                        
+
                     } catch (Exception e) {
                         slackSend(
                             channel: env.SLACK_CHANNEL,
