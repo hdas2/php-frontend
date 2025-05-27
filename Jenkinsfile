@@ -461,4 +461,73 @@ def buildSlackMessage(report) {
     return [color: color, text: text]
 }
 
+// OWASP Dependency Check Report Processor
+def processScanResults(appDir) {
+    def reportPath = "${appDir}/reports"
+    def jsonPath = "${reportPath}/dependency-check-report.json"
+    def csvPath = "${reportPath}/dependency-check-report.csv"
+    def htmlPath = "${reportPath}/dependency-check-report.html"
 
+    if (!fileExists(jsonPath)) {
+        error "Dependency Check JSON report not found at ${jsonPath}"
+    }
+
+    echo "📖 Reading Dependency Check report at ${jsonPath}"
+    def report = readJSON file: jsonPath
+    def vulnCounts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
+
+    report.dependencies.each { dep ->
+        dep.vulnerabilities?.each { vuln ->
+            def severity = vuln.severity?.toUpperCase()
+            if (vulnCounts.containsKey(severity)) {
+                vulnCounts[severity]++
+            }
+        }
+    }
+
+    // Slack summary
+    def color = vulnCounts.CRITICAL > 0 ? 'danger' :
+                vulnCounts.HIGH > 0 ? 'warning' : 'good'
+
+    slackSend(
+        channel: env.SLACK_CHANNEL,
+        color: color,
+        message: """
+        :shield: *Dependency Check Results* - `${env.JOB_NAME}`
+        *Critical:* ${vulnCounts.CRITICAL} :red_circle:
+        *High:* ${vulnCounts.HIGH} :orange_circle:
+        *Medium:* ${vulnCounts.MEDIUM} :yellow_circle:
+        *Low:* ${vulnCounts.LOW} :white_circle:
+        """
+    )
+
+    // Optional CSV snippet
+    if (fileExists(csvPath)) {
+        def csvContent = readFile(csvPath).take(3000)
+        slackSend(
+            channel: env.SLACK_CHANNEL,
+            color: '#CCCCCC',
+            message: ":page_facing_up: *CSV Report Snippet:* \n```" + csvContent + "```"
+        )
+    } else {
+        echo "CSV report not found at ${csvPath}"
+    }
+
+    // Attach HTML report
+    if (fileExists(htmlPath)) {
+        slackUploadFile(
+            filePath: htmlPath,
+            filename: "dependency-check-report.html",
+            title: "Dependency Check HTML Report",
+            initialComment: ":mag: HTML Report for `${env.JOB_NAME}`",
+            channel: env.SLACK_CHANNEL
+        )
+    } else {
+        echo "HTML report not found at ${htmlPath}"
+    }
+
+    // Optionally fail build on critical vulns
+    if (vulnCounts.CRITICAL > 0) {
+        error "Build failed: ${vulnCounts.CRITICAL} critical vulnerabilities found"
+    }
+}
