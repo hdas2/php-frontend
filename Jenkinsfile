@@ -476,30 +476,37 @@ pipeline {
                 script {
                     try {
                         withCredentials([string(credentialsId: 'argocd-token', variable: 'ARGOCD_TOKEN')]) {
-                            sh """
-                            cd /applications/php-frontend
-                            echo "Updating ArgoCD manifest with new image tag..."
-                            
-                            # Clone the GitOps repo
-                            git clone https://github.com/hdas2/php-frontend.git
-                            cd php-frontend
-                            
-                            # Update image tag in values.yaml
-                            yq eval ".image.tag = \"${env.BUILD_NUMBER}\"" -i helm/charts/${APP_NAME}/values.yaml
-                            
-                            # Commit and push changes
-                            git config user.name "hdas2"
-                            git config user.email "hdas2@sastasundar.com"
-                            git add charts/${APP_NAME}/values.yaml
-                            git commit -m "Update ${APP_NAME} image to ${env.BUILD_NUMBER}"
-                            git push origin main
-                            
-                            # Sync ArgoCD application
-                            curl -X POST \
-                                -H "Authorization: Bearer ${ARGOCD_TOKEN}" \
-                                ${ARGOCD_SERVER}/api/v1/applications/${APP_NAME}/sync \
-                                -d '{}'
-                            """
+                            dir('/applications/php-frontend') {
+                                deleteDir() // clean old content
+
+                                sh '''
+                                    echo "Updating ArgoCD manifest with new image tag..."
+
+                                    # Clone the GitOps repo
+                                    git clone https://github.com/hdas2/php-frontend.git
+                                    cd php-frontend
+
+                                    # Update image tag in values.yaml
+                                    yq e ".image.tag = \\"${BUILD_NUMBER}\\"" -i helm/charts/${APP_NAME}/values.yaml
+
+                                    # Commit and push changes
+                                    git config user.name "hdas2"
+                                    git config user.email "hdas2@sastasundar.com"
+                                    git add helm/charts/${APP_NAME}/values.yaml
+                                    git commit -m "Update ${APP_NAME} image to ${BUILD_NUMBER}"
+                                    git push origin main
+                                '''
+
+                                // Use safe curl call outside of the shell
+                                withEnv(["ARGOCD_TOKEN=${ARGOCD_TOKEN}"]) {
+                                    sh '''
+                                        curl -X POST \
+                                        -H "Authorization: Bearer $ARGOCD_TOKEN" \
+                                        ${ARGOCD_SERVER}/api/v1/applications/${APP_NAME}/sync \
+                                        -d '{}'
+                                    '''
+                                }
+                            }
                         }
                         slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: ArgoCD manifest updated and synced")
                     } catch (e) {
@@ -509,6 +516,7 @@ pipeline {
                 }
             }
         }
+
     }
     
     post {
