@@ -216,7 +216,7 @@ pipeline {
                             --project ${APP_NAME} \
                             --out ${WORKSPACE}/reports \
                             --scan . \
-                            --format JSON \
+                            --format CSV \
                             --format HTML \
                             --nvdApiKey ${NVD_API_KEY} \
                             --log ${WORKSPACE}/reports/dependency-check.log
