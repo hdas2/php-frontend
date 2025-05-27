@@ -436,25 +436,41 @@ pipeline {
             steps {
                 script {
                     try {
-                        withAWS(credentials: 'aws-credentials', region: AWS_REGION) {
+                        // Bind AWS credentials stored in Jenkins credential 'aws-credentials'
+                        withCredentials([[
+                            $class: 'AmazonWebServicesCredentialsBinding',
+                            credentialsId: 'aws-credentials',
+                            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                        ]]) {
                             sh """
                             cd /applications/php-frontend
                             echo "Logging in to ECR..."
-                            aws ecr get-login-password | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-                            
-                            echo "Pushing image to ECR..."
+                            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+
+                            echo "Pushing Docker image ${ECR_REPO}:${env.BUILD_NUMBER} to ECR..."
                             docker push ${ECR_REPO}:${env.BUILD_NUMBER}
                             """
                         }
-                        slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Docker image pushed to ECR")
+
+                        slackSend(
+                            channel: SLACK_CHANNEL,
+                            color: 'good',
+                            message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Docker image pushed to ECR"
+                        )
                     } catch (e) {
-                        slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Failed to push Docker image to ECR")
-                        error "Failed to push Docker image to ECR"
+                        echo "Push to ECR failed: ${e}"
+                        slackSend(
+                            channel: SLACK_CHANNEL,
+                            color: 'danger',
+                            message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Failed to push Docker image to ECR"
+                        )
+                        error("Failed to push Docker image to ECR")
                     }
                 }
             }
         }
-        
+
         stage('Update ArgoCD Manifest') {
             steps {
                 script {
