@@ -222,57 +222,60 @@ pipeline {
                             --log ${APP_DIR}/reports/dependency-check.log
                         '''
 
-                        // Parse CSV - with better error handling
                         def csvFile = "${APP_DIR}/reports/dependency-check-report.csv"
-                        
-                        // Verify file exists before reading
+
                         if (!fileExists(csvFile)) {
                             error "Dependency Check CSV report not found at: ${csvFile}"
                         }
-                        
-                        // Read and parse CSV content
+
                         def csvContent = readFile(csvFile)
                         if (!csvContent?.trim()) {
                             error "Dependency Check CSV report is empty"
                         }
-                        
+
                         def lines = csvContent.split('\n') as List
-                        if (lines.size() < 2) { // Need at least header + 1 row
+                        if (lines.size() < 2) {
                             error "No vulnerabilities found in Dependency Check report"
                         }
-                        
-                        // Process headers
-                        def headers = lines[0].split(',').collect { it.trim().replaceAll('^"|"$', '') }
 
+                        // --- CSV Line Parser Function ---
+                        @NonCPS
+                        def parseCSVLine = { line ->
+                            def matcher = line =~ /(?:^|,)(?:"([^"]*)"|([^",]*))/
+                            def result = []
+                            while (matcher.find()) {
+                                result << (matcher.group(1) ?: matcher.group(2))
+                            }
+                            return result
+                        }
+
+                        def headers = parseCSVLine(lines[0]).collect { it.trim() }
                         def severityCount = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
                         def findings = []
 
-                        // Process each row (skip header)
                         for (int i = 1; i < lines.size(); i++) {
-                            def values = lines[i].split(',').collect { it.trim().replaceAll('^"|"$', '') }
+                            def values = parseCSVLine(lines[i])
                             def row = [:]
                             headers.eachWithIndex { header, index ->
                                 row[header] = index < values.size() ? values[index] : null
                             }
-                            
-                            // Determine severity - more robust detection
-                            def sev = row['CVSSv3_BaseSeverity']?.toUpperCase() ?: 
+
+                            def sev = row['CVSSv3_BaseSeverity']?.toUpperCase() ?:
                                     row['CVSSv2_Severity']?.toUpperCase() ?:
-                                    (row['CVSSv3_BaseScore']?.toFloat() >= 9.0 ? 'CRITICAL' :
-                                    row['CVSSv3_BaseScore']?.toFloat() >= 7.0 ? 'HIGH' :
-                                    row['CVSSv3_BaseScore']?.toFloat() >= 4.0 ? 'MEDIUM' :
-                                    row['CVSSv3_BaseScore']?.toFloat() > 0 ? 'LOW' :
-                                    row['CVSSv2_Score']?.toFloat() >= 7.0 ? 'HIGH' :
-                                    row['CVSSv2_Score']?.toFloat() >= 4.0 ? 'MEDIUM' :
-                                    row['CVSSv2_Score']?.toFloat() > 0 ? 'LOW' : null)
-                            
+                                    (row['CVSSv3_BaseScore']?.isFloat() && row['CVSSv3_BaseScore'].toFloat() >= 9.0 ? 'CRITICAL' :
+                                    row['CVSSv3_BaseScore']?.isFloat() && row['CVSSv3_BaseScore'].toFloat() >= 7.0 ? 'HIGH' :
+                                    row['CVSSv3_BaseScore']?.isFloat() && row['CVSSv3_BaseScore'].toFloat() >= 4.0 ? 'MEDIUM' :
+                                    row['CVSSv3_BaseScore']?.isFloat() && row['CVSSv3_BaseScore'].toFloat() > 0 ? 'LOW' :
+                                    row['CVSSv2_Score']?.isFloat() && row['CVSSv2_Score'].toFloat() >= 7.0 ? 'HIGH' :
+                                    row['CVSSv2_Score']?.isFloat() && row['CVSSv2_Score'].toFloat() >= 4.0 ? 'MEDIUM' :
+                                    row['CVSSv2_Score']?.isFloat() && row['CVSSv2_Score'].toFloat() > 0 ? 'LOW' : null)
+
                             if (sev) {
-                                // Normalize severity
                                 sev = sev.contains('CRIT') ? 'CRITICAL' :
                                     sev.contains('HIGH') ? 'HIGH' :
                                     sev.contains('MED') ? 'MEDIUM' :
                                     sev.contains('LOW') ? 'LOW' : sev
-                                
+
                                 if (sev in ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']) {
                                     severityCount[sev] = (severityCount[sev] ?: 0) + 1
                                     findings << [
@@ -287,13 +290,12 @@ pipeline {
                             }
                         }
 
-                        // Format top 10 into a Markdown-style table
-                        def top10 = findings.sort { a, b -> 
+                        def top10 = findings.sort { a, b ->
                             def scoreA = a.score == 'N/A' ? 0 : a.score.toFloat()
                             def scoreB = b.score == 'N/A' ? 0 : b.score.toFloat()
                             return scoreB <=> scoreA
                         }.take(10)
-                        
+
                         def tableHeader = "| Severity | Package           | CVE ID       | Score | Description              |\n" +
                                         "|----------|-------------------|--------------|-------|--------------------------|"
                         def tableRows = top10.collect {
@@ -323,7 +325,6 @@ pipeline {
                             filePath: "${APP_DIR}/reports/dependency-check-report.html"
                         )
 
-                        // Fail if critical vulnerabilities found
                         if ((severityCount.CRITICAL ?: 0) > 0) {
                             error "Build failed: ${severityCount.CRITICAL} critical vulnerabilities found"
                         }
