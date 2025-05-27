@@ -511,7 +511,7 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Post-Deployment Checks') {
             steps {
                 script {
@@ -529,6 +529,7 @@ pipeline {
                 }
             }
         }
+    }
     
     post {
         always {
