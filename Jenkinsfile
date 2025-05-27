@@ -217,8 +217,11 @@ pipeline {
 
                         // Run the actual scan (example command — adjust based on your tool/integration)
                         sh """
-                            dependency-check.sh \
+                        cd ${APP_DIR} \
+                            dependency-check \
                                 --project ${env.JOB_NAME} \
+                                --nvdApiKey ${NVD_API_KEY} \
+                                --scan . \
                                 --scan ${APP_DIR} \
                                 --out ${outputDir} \
                                 --format ALL \
