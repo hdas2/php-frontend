@@ -222,43 +222,49 @@ pipeline {
                             --log ${WORKSPACE}/reports/dependency-check.log
                         '''
 
-                        // Parse CSV - improved version
-                        def csvFile = "${WORKSPACE}/reports/dependency-check-report.csv"
-                        def csvContent = readFile(csvFile)
-                        def lines = csvContent.split('\n')
-                        
-                        // Process headers - replaced spread operator with collect()
+                        // Process headers
                         def headers = lines[0].split(',').collect { it.trim().replaceAll('^"|"$', '') }
-                        
+
                         def severityCount = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
                         def findings = []
 
                         // Process each row (skip header)
                         for (int i = 1; i < lines.size(); i++) {
-                            // Replaced spread operator with collect()
                             def values = lines[i].split(',').collect { it.trim().replaceAll('^"|"$', '') }
                             def row = [:]
                             headers.eachWithIndex { header, index ->
                                 row[header] = index < values.size() ? values[index] : null
                             }
                             
-                            // Determine severity - prefer CVSSv3, fall back to CVSSv2
+                            // Determine severity - check all possible severity columns
                             def sev = row['CVSSv3_BaseSeverity']?.toUpperCase() ?: 
-                                    row['CVSSv2_Severity']?.toUpperCase()
+                                    row['CVSSv2_Severity']?.toUpperCase() ?:
+                                    // Some vulnerabilities might have severity in different columns
+                                    (row['CVSSv2_Score']?.toFloat() >= 9.0 ? 'CRITICAL' : 
+                                    row['CVSSv2_Score']?.toFloat() >= 7.0 ? 'HIGH' :
+                                    row['CVSSv2_Score']?.toFloat() >= 4.0 ? 'MEDIUM' :
+                                    row['CVSSv2_Score']?.toFloat() > 0 ? 'LOW' : null)
                             
-                            if (sev in ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']) {
-                                severityCount[sev] = (severityCount[sev] ?: 0) + 1
-                                findings << [
-                                    severity: sev,
-                                    package: "${row['DependencyName'] ?: 'N/A'}:${row['Version'] ?: 'N/A'}",
-                                    cve: row['CVE'] ?: 'N/A',
-                                    score: row['CVSSv3_BaseScore'] ?: row['CVSSv2_Score'] ?: 'N/A',
-                                    description: row['ShortDescription']?.take(100) ?: 
-                                                row['Vulnerability']?.take(100) ?: 'No description'
-                                ]
+                            if (sev) {
+                                // Normalize severity (some might come as "CRITICAL" or "HIGHEST")
+                                sev = sev.contains('CRIT') ? 'CRITICAL' :
+                                    sev.contains('HIGH') ? 'HIGH' :
+                                    sev.contains('MED') ? 'MEDIUM' :
+                                    sev.contains('LOW') ? 'LOW' : sev
+                                
+                                if (sev in ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']) {
+                                    severityCount[sev] = (severityCount[sev] ?: 0) + 1
+                                    findings << [
+                                        severity: sev,
+                                        package: "${row['DependencyName'] ?: 'N/A'}:${row['Version'] ?: 'N/A'}",
+                                        cve: row['CVE'] ?: 'N/A',
+                                        score: row['CVSSv3_BaseScore'] ?: row['CVSSv2_Score'] ?: 'N/A',
+                                        description: row['ShortDescription']?.take(100) ?: 
+                                                    row['Vulnerability']?.take(100) ?: 'No description'
+                                    ]
+                                }
                             }
                         }
-
                         // Format top 10 into a Markdown-style table
                         def top10 = findings.sort { a, b -> 
                             def scoreA = a.score == 'N/A' ? 0 : a.score.toFloat()
