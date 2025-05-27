@@ -416,7 +416,7 @@ pipeline {
                         // Upload full report
                         slackUploadFile(
                             channel: SLACK_CHANNEL,
-                            filePath: 'trivy-image-report.txt',
+                            filePath: '${APP_DIR}/trivy-image-report.txt',
                             initialComment: "📄 *Full Trivy Report* for ${env.JOB_NAME} #${env.BUILD_NUMBER}"
                         )
 
