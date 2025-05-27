@@ -228,14 +228,17 @@ pipeline {
                         def lines = csvContent.split('\n')
                         
                         // Process headers
-                        def headers = lines[0].split(',')*.trim().collect { it.replaceAll('^"|"$', '') }
-                        
+                        // def headers = lines[0].split(',')*.trim().collect { it.replaceAll('^"|"$','') }
+                        def headers = lines[0].split(',').collect { it.trim().replaceAll('^"|"$','') }
+
                         def severityCount = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
                         def findings = []
 
                         // Process each row (skip header)
+                        // for (int i = 1; i < lines.size(); i++) {
                         for (int i = 1; i < lines.size(); i++) {
-                            def values = lines[i].split(',')*.trim().collect { it.replaceAll('^"|"$', '') }
+                            // def values = lines[i].split(',')*.trim().collect { it.replaceAll('^"|"$','') }
+                            def values = lines[i].split(',').collect { it.trim().replaceAll('^"|"$','') }
                             def row = [:]
                             headers.eachWithIndex { header, index ->
                                 row[header] = index < values.size() ? values[index] : null
