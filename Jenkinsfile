@@ -11,7 +11,7 @@ pipeline {
         // AWS Configuration
         AWS_ACCOUNT_ID = '699951450237'
         AWS_REGION = 'ap-south-1'
-        ECR_REPO = "rspl-sandbox-ecr"
+        ECR_REPO = "699951450237.dkr.ecr.ap-south-1.amazonaws.com/rspl-sandbox-ecr"
         
         // Tool Configuration
         SONARQUBE_URL = 'https://sonarqube.retailershakti.com'
@@ -348,7 +348,7 @@ pipeline {
                         sh """
                         cd /applications/php-frontend
                         echo "Building Docker image..."
-                        docker build -t ${ECR_REPO}:${env.BUILD_NUMBER} .
+                        docker build -t ${ECR_REPO}/${APP_NAME}:${env.BUILD_NUMBER} .
                         """
                         slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Docker image built successfully")
                     } catch (e) {
@@ -449,7 +449,7 @@ pipeline {
                             aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
 
                             echo "Pushing Docker image ${ECR_REPO}:${env.BUILD_NUMBER} to ECR..."
-                            docker push ${ECR_REPO}:${env.BUILD_NUMBER}
+                            docker push ${ECR_REPO}/${APP_NAME}:${env.BUILD_NUMBER}
                             """
                         }
 
