@@ -214,12 +214,12 @@ pipeline {
                         cd /applications/php-frontend
                         dependency-check \
                             --project ${APP_NAME} \
-                            --out ${WORKSPACE}/reports \
+                            --out ${APP_DIR}/reports \
                             --scan . \
                             --format CSV \
                             --format HTML \
                             --nvdApiKey ${NVD_API_KEY} \
-                            --log ${WORKSPACE}/reports/dependency-check.log
+                            --log ${APP_DIR}/reports/dependency-check.log
                         '''
 
                         // Parse CSV - with better error handling
@@ -320,7 +320,7 @@ pipeline {
                             color: severityCount.CRITICAL > 0 ? 'danger' :
                                 severityCount.HIGH > 0 ? 'warning' : 'good',
                             message: slackMessage,
-                            filePath: "${WORKSPACE}/reports/dependency-check-report.html"
+                            filePath: "${APP_DIR}/reports/dependency-check-report.html"
                         )
 
                         // Fail if critical vulnerabilities found
