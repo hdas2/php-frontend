@@ -208,40 +208,76 @@ pipeline {
             steps {
                 script {
                     try {
-                        echo "🔍 Running OWASP Dependency Check..."
-
-                        def outputDir = "${APP_DIR}/reports"
-                        def jsonReport = "${outputDir}/dependency-check-report.json"
-                        def htmlReport = "${outputDir}/dependency-check-report.html"
-                        def logFile = "${outputDir}/dependency-check.log"
-
-                        // Run the actual scan (example command — adjust based on your tool/integration)
-                        sh """
-                        cd ${APP_DIR} \
-                            dependency-check \
-                                --project ${env.JOB_NAME} \
-                                --nvdApiKey ${NVD_API_KEY} \
-                                --scan . \
-                                --scan ${APP_DIR} \
-                                --out ${outputDir} \
-                                --format ALL \
-                                --log ${logFile}
-                        """
-
-                        // Display report files for debugging
-                        echo "📂 Verifying reports at: ${outputDir}"
-                        sh "ls -l ${outputDir}"
-
-                        // Show log content if reports are missing
-                        if (!fileExists(jsonReport) || !fileExists(htmlReport)) {
-                            def logContent = fileExists(logFile) ? readFile(logFile).take(1000) : 'No log file available'
-                            echo "🛑 Dependency Check log:\n${logContent}"
-                            error "Dependency Check failed to generate required reports."
+                        // Run Dependency Check
+                        sh '''
+                        mkdir -p reports
+                        cd /applications/php-frontend
+                        dependency-check \
+                            --project ${APP_NAME} \
+                            --out ${WORKSPACE}/reports \
+                            --scan . \
+                            --format JSON \
+                            --format HTML \
+                            --nvdApiKey ${NVD_API_KEY} \
+                            --log ${WORKSPACE}/reports/dependency-check.log
+                        '''
+                        
+                        // Process and send results
+                        def report = readJSON file: "${WORKSPACE}/reports/dependency-check-report.json"
+                        
+                        // Count vulnerabilities and collect findings
+                        def vulnCounts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
+                        def findings = []
+                        
+                        report.dependencies.each { dep ->
+                            dep.vulnerabilities?.each { vuln ->
+                                def severity = vuln.severity?.toUpperCase()
+                                if (vulnCounts.containsKey(severity)) {
+                                    vulnCounts[severity]++
+                                    findings << [
+                                        severity: severity,
+                                        package: dep.fileName,
+                                        cve: vuln.name,
+                                        cvss: vuln.cvssv3?.baseScore ?: vuln.cvssv2?.score ?: 'N/A',
+                                        description: vuln.description?.take(100)?.replace('\n', ' ') ?: 'No description'
+                                    ]
+                                }
+                            }
                         }
-
-                        // Process and send to Slack
-                        processScanResults(APP_DIR)
-
+                        
+                        // Format as Slack table
+                        def tableHeader = "| Severity  | Package (truncated) | CVE ID       | CVSS | Description (truncated) |\n" +
+                                         "|-----------|---------------------|--------------|------|--------------------------|"
+                        
+                        def tableRows = findings.sort { -it.cvss }.take(10).collect { finding ->
+                            String.metaClass.trunc = { n -> delegate.size() > n ? delegate.take(n-3) + '...' : delegate }
+                            "| ${finding.severity.padRight(8)} | ${finding.package.trunc(20).padRight(19)} | ${finding.cve?.trunc(12)?.padRight(12)} | ${finding.cvss.toString().padRight(4)} | ${finding.description.trunc(24).padRight(24)} |"
+                        }.join("\n")
+                        
+                        def fullTable = "```\n${tableHeader}\n${tableRows}\n```"
+                        
+                        // Send to Slack
+                        slackSend(
+                            channel: env.SLACK_CHANNEL,
+                            color: vulnCounts.CRITICAL > 0 ? 'danger' : (vulnCounts.HIGH > 0 ? 'warning' : 'good'),
+                            message: """
+                            *Dependency Check Results for ${APP_NAME}*
+                            :red_circle: *Critical*: ${vulnCounts.CRITICAL}  
+                            :large_orange_circle: *High*: ${vulnCounts.HIGH}  
+                            :yellow_circle: *Medium*: ${vulnCounts.MEDIUM}  
+                            :white_circle: *Low*: ${vulnCounts.LOW}
+                            
+                            *Top 10 Vulnerabilities by CVSS Score*
+                            ${fullTable}
+                            """,
+                            filePath: "${WORKSPACE}/reports/dependency-check-report.html"
+                        )
+                        
+                        // Fail build if critical vulnerabilities found
+                        if (vulnCounts.CRITICAL > 0) {
+                            error "Build failed: ${vulnCounts.CRITICAL} critical vulnerabilities found"
+                        }
+                        
                     } catch (Exception e) {
                         slackSend(
                             channel: env.SLACK_CHANNEL,
@@ -426,155 +462,3 @@ def buildSlackMessage(report) {
 }
 
 
-// OWASP Dependency Check Report Processor
-def processScanResults() {
-    // Parse JSON report
-    def report = readJSON file: "${WORKSPACE}/reports/dependency-check-report.json"
-    
-    // Count vulnerabilities
-    def vulnCounts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
-    def findings = []
-    
-    report.dependencies.each { dep ->
-        dep.vulnerabilities?.each { vuln ->
-            def severity = vuln.severity?.toUpperCase()
-            if (vulnCounts.containsKey(severity)) {
-                vulnCounts[severity]++
-                findings << [
-                    severity: severity,
-                    package: dep.fileName,
-                    cve: vuln.name,
-                    cvss: vuln.cvssv3?.baseScore ?: vuln.cvssv2?.score ?: 'N/A',
-                    description: vuln.description?.take(100) ?: 'No description'
-                ]
-            }
-        }
-    }
-    
-    // Generate Markdown table
-    def tableHeader = "| Severity | Package | CVE | CVSS | Description |\n|----------|---------|-----|------|-------------|"
-    def tableRows = findings.take(10).collect { finding ->
-        "| ${finding.severity} | ${finding.package} | ${finding.cve} | ${finding.cvss} | ${finding.description} |"
-    }.join("\n")
-    
-    def fullTable = "${tableHeader}\n${tableRows}"
-    
-    // Send to Slack
-    slackSend(
-        channel: env.SLACK_CHANNEL,
-        color: vulnCounts.CRITICAL > 0 ? 'danger' : (vulnCounts.HIGH > 0 ? 'warning' : 'good'),
-        message: """
-        *Dependency Check Results Summary*
-        Critical: ${vulnCounts.CRITICAL} :red_circle:
-        High: ${vulnCounts.HIGH} :large_orange_circle:
-        Medium: ${vulnCounts.MEDIUM} :yellow_circle:
-        Low: ${vulnCounts.LOW} :white_circle:
-        
-        *Top Vulnerabilities*
-        ```
-        ${fullTable}
-        ```
-        """
-    )
-    
-    // Fail build if critical vulnerabilities found
-    if (vulnCounts.CRITICAL > 0) {
-        error "Build failed: ${vulnCounts.CRITICAL} critical vulnerabilities found"
-    }
-
-    def generateSlackCsvTable(findings) {
-    def csvHeader = "Severity,Package,CVE,CVSS,Description"
-    def csvRows = findings.take(10).collect { finding ->
-        "${finding.severity},${finding.package},${finding.cve},${finding.cvss},\"${finding.description}\""
-    }.join("\n")
-    
-    return "${csvHeader}\n${csvRows}"
-}
-
-// Then in your slackSend:
-message: """
-*Dependency Check Results*
-Critical: ${vulnCounts.CRITICAL}
-High: ${vulnCounts.HIGH}
-Medium: ${vulnCounts.MEDIUM}
-Low: ${vulnCounts.LOW}
-
-*Top Vulnerabilities*
-\`\`\`
-${generateSlackCsvTable(findings)}
-\`\`\`
-"""
-def formatForSlack(findings) {
-    def maxWidths = [severity: 8, package: 30, cve: 15, cvss: 5, description: 50]
-    
-    // Format header
-    def header = "```\n" +
-        "Severity".padRight(maxWidths.severity) + " | " +
-        "Package".padRight(maxWidths.package) + " | " +
-        "CVE".padRight(maxWidths.cve) + " | " +
-        "CVSS".padRight(maxWidths.cvss) + " | " +
-        "Description".padRight(maxWidths.description) + "\n" +
-        "-".padRight(maxWidths.severty, '-') + "-|-" +
-        "-".padRight(maxWidths.package, '-') + "-|-" +
-        "-".padRight(maxWidths.cve, '-') + "-|-" +
-        "-".padRight(maxWidths.cvss, '-') + "-|-" +
-        "-".padRight(maxWidths.description, '-') + "\n"
-    
-    // Format rows
-    def rows = findings.take(10).collect { finding ->
-        finding.severity.padRight(maxWidths.severity) + " | " +
-        finding.package.take(maxWidths.package).padRight(maxWidths.package) + " | " +
-        finding.cve.take(maxWidths.cve).padRight(maxWidths.cve) + " | " +
-        finding.cvss.toString().padRight(maxWidths.cvss) + " | " +
-        finding.description.take(maxWidths.description).padRight(maxWidths.description)
-    }.join("\n")
-    
-    return header + rows + "\n```"
-}
-
-    // Slack summary
-    def color = vulnCounts.CRITICAL > 0 ? 'danger' :
-                vulnCounts.HIGH > 0 ? 'warning' : 'good'
-
-    slackSend(
-        channel: env.SLACK_CHANNEL,
-        color: color,
-        message: """
-        :shield: *Dependency Check Results* - `${env.JOB_NAME}`
-        *Critical:* ${vulnCounts.CRITICAL} :red_circle:
-        *High:* ${vulnCounts.HIGH} :orange_circle:
-        *Medium:* ${vulnCounts.MEDIUM} :yellow_circle:
-        *Low:* ${vulnCounts.LOW} :white_circle:
-        """
-    )
-
-    // Optional CSV snippet
-    if (fileExists(csvPath)) {
-        def csvContent = readFile(csvPath).take(3000)
-        slackSend(
-            channel: env.SLACK_CHANNEL,
-            color: '#CCCCCC',
-            message: ":page_facing_up: *CSV Report Snippet:* \n```" + csvContent + "```"
-        )
-    } else {
-        echo "CSV report not found at ${csvPath}"
-    }
-
-    // Attach HTML report
-    if (fileExists(htmlPath)) {
-        slackUploadFile(
-            filePath: htmlPath,
-            filename: "dependency-check-report.html",
-            title: "Dependency Check HTML Report",
-            initialComment: ":mag: HTML Report for `${env.JOB_NAME}`",
-            channel: env.SLACK_CHANNEL
-        )
-    } else {
-        echo "HTML report not found at ${htmlPath}"
-    }
-
-    // Optionally fail build on critical vulns
-    if (vulnCounts.CRITICAL > 0) {
-        error "Build failed: ${vulnCounts.CRITICAL} critical vulnerabilities found"
-    }
-}
