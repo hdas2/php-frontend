@@ -223,7 +223,7 @@ pipeline {
                         '''
 
                         // Parse CSV - with better error handling
-                        def csvFile = "${WORKSPACE}/reports/dependency-check-report.csv"
+                        def csvFile = "${APP_DIR}/reports/dependency-check-report.csv"
                         
                         // Verify file exists before reading
                         if (!fileExists(csvFile)) {
