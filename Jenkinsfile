@@ -481,12 +481,13 @@ pipeline {
                                 echo "Updating ArgoCD manifest with new image tag..."
                                 sh '''
                                     # Update image tag in values.yaml
-                                    yq e ".image.tag = \\"${BUILD_NUMBER}\\"" -i helm/charts/values.yaml
+                                    yq e ".image.tag = \\"${BUILD_NUMBER}\\"" -i helm/charts/values.yaml /
                                     # Commit and push changes
-                                    git config user.name "hdas2"
-                                    git config user.email "hdas2@sastasundar.com"
-                                    git add helm/charts/values.yaml
-                                    git commit -m "Update ${APP_NAME} image to ${BUILD_NUMBER}"
+                                    cd ${APP_DIR} /
+                                    git config user.name "hdas2" /
+                                    git config user.email "hdas2@sastasundar.com" /
+                                    git add helm/charts/values.yaml /
+                                    git commit -m "Update ${APP_NAME} image to ${BUILD_NUMBER}" /
                                     git push origin main
                                 '''
 
