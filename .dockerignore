@@ -1,0 +1,44 @@
+# Ignore Dockerfile itself if not needed in the image
+Dockerfile
+
+# Common junk and temporary files
+*.log
+*.tmp
+*.swp
+*.bak
+
+# Node and Composer vendor directories (if not rebuilding them)
+node_modules
+vendor
+
+# Build and dependency tools output
+test-reports/
+logs/
+sonarqube/
+dependency-reports/
+coverage/
+.junit/
+
+# Git metadata and local configs
+.git
+.gitignore
+.env
+*.env
+*.local
+*.md
+
+# OS & editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Reports
+dependency-check-reports
+dependency-test-reports
+reports
+helm
+trivy-report.json
+dependency-check.log
+dc.properties
+.phpunit.result.cache

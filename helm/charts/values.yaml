@@ -1,7 +1,7 @@
 replicaCount: 2
 
 image:
-  repository: your-ecr-repo/php-frontend
+  repository: 699951450237.dkr.ecr.ap-south-1.amazonaws.com/rspl-sandbox-ecr/php-frontend
   pullPolicy: IfNotPresent
   tag: "latest"
 
@@ -22,7 +22,7 @@ ingress:
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
   hosts:
-    - host: php-frontend.your-domain.com
+    - host: php-frontend.retailershakti.com
       paths:
         - path: /
           pathType: Prefix
@@ -53,7 +53,7 @@ istio:
   enabled: true
   virtualService:
     hosts:
-      - php-frontend.your-domain.com
+      - php-frontend.retailershakti.com
     gateways:
       - istio-system/istio-gateway
     trafficPolicy:

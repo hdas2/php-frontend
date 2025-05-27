@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM php:8.2-fpm as builder
+FROM php:8.4-fpm AS builder
 
 WORKDIR /var/www/html
 
@@ -19,20 +19,20 @@ RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Copy composer files
-COPY app/composer.* ./
+# Copy composer files from root
+COPY composer.* ./
 
 # Install dependencies (remove --no-dev for production)
 RUN composer install --no-dev --no-scripts --no-autoloader --ignore-platform-reqs
 
 # Copy application files
-COPY app .
+COPY . .
 
 # Run composer autoloader
 RUN composer dump-autoload --optimize
 
 # Stage 2: Production
-FROM php:8.2-fpm
+FROM php:8.4-fpm
 
 WORKDIR /var/www/html
 
