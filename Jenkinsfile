@@ -11,7 +11,7 @@ pipeline {
         // AWS Configuration
         AWS_ACCOUNT_ID = '699951450237'
         AWS_REGION = 'ap-south-1'
-        ECR_REPO = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${DOCKER_IMAGE}"
+        ECR_REPO = "rspl-sandbox-ecr"
         
         // Tool Configuration
         SONARQUBE_URL = 'https://sonarqube.retailershakti.com'
