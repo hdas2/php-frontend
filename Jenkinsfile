@@ -5,7 +5,7 @@ pipeline {
     }
     environment {
         // Application Configuration
-        APP_NAME = '-php-frontend'
+        APP_NAME = 'php-frontend'
         DOCKER_IMAGE = 'php-frontend'
         
         // AWS Configuration
