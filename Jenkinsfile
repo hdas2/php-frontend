@@ -372,7 +372,7 @@ pipeline {
                         """
 
                         // Parse summary from JSON
-                        def trivyReport = readJSON file: 'trivy-image-report.json'
+                        def trivyReport = readJSON file: '${APP_DIR}/trivy-image-report.json'
                         if (!trivyReport.Results || trivyReport.Results.isEmpty()) {
                             slackSend(
                                 channel: SLACK_CHANNEL,
