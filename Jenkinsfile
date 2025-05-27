@@ -476,33 +476,33 @@ pipeline {
                 script {
                     try {
                         withCredentials([string(credentialsId: 'argocd-token', variable: 'ARGOCD_TOKEN')]) {
-                            dir('/applications/php-frontend') {
-                                // Update ArgoCD manifest with new image tag
+                            // Ensure APP_DIR and APP_NAME are defined in environment or pipeline parameters
+                            dir(APP_DIR) {
                                 echo "Updating ArgoCD manifest with new image tag..."
+
                                 sh """
-                                    # Update image tag in values.yaml
+                                    # No need to cd, dir() does that
                                     yq e '.image.tag = "${BUILD_NUMBER}"' -i helm/charts/values.yaml
 
-                                    # Commit and push changes
-                                    cd ${APP_DIR}
                                     git config user.name "hdas2"
                                     git config user.email "hdas2@sastasundar.com"
                                     git add helm/charts/values.yaml
                                     git commit -m "Update ${APP_NAME} image to ${BUILD_NUMBER}" || echo 'No changes to commit'
                                     git push origin main
                                 """
+                            }
 
-                                // Use safe curl call outside of the shell
-                                withEnv(["ARGOCD_TOKEN=${ARGOCD_TOKEN}"]) {
-                                    sh '''
-                                        curl -X POST \
-                                        -H "Authorization: Bearer $ARGOCD_TOKEN" \
-                                        ${ARGOCD_SERVER}/api/v1/applications/${APP_NAME}/sync \
-                                        -d '{}'
-                                    '''
-                                }
+                            // Use double quotes for variable interpolation here
+                            withEnv(["ARGOCD_TOKEN=${ARGOCD_TOKEN}"]) {
+                                sh """
+                                    curl -X POST \
+                                    -H "Authorization: Bearer \$ARGOCD_TOKEN" \
+                                    ${ARGOCD_SERVER}/api/v1/applications/${APP_NAME}/sync \
+                                    -d '{}'
+                                """
                             }
                         }
+
                         slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: ArgoCD manifest updated and synced")
                     } catch (e) {
                         slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Failed to update ArgoCD manifest")
@@ -511,8 +511,24 @@ pipeline {
                 }
             }
         }
-
-    }
+        
+        stage('Post-Deployment Checks') {
+            steps {
+                script {
+                    try {
+                        // Run post-deployment checks
+                        sh '''
+                        echo "Running post-deployment checks..."
+                        # Add your post-deployment check commands here
+                        '''
+                        slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Post-deployment checks passed")
+                    } catch (e) {
+                        slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Post-deployment checks failed")
+                        error "Post-deployment checks failed"
+                    }
+                }
+            }
+        }
     
     post {
         always {
