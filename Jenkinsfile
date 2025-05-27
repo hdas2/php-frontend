@@ -483,7 +483,7 @@ pipeline {
                                 sh """
                                     # No need to cd, dir() does that
                                     yq e '.image.tag = "${BUILD_NUMBER}"' -i helm/charts/values.yaml
-
+                                    pwd
                                     git config user.name "hdas2"
                                     git config user.email "hdas2@sastasundar.com"
                                     git add helm/charts/values.yaml
