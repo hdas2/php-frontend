@@ -222,37 +222,43 @@ pipeline {
                             --log ${WORKSPACE}/reports/dependency-check.log
                         '''
 
-                        // Parse CSV - use readFile and split manually to avoid sandbox issues
-                        def csvContent = readFile("${WORKSPACE}/reports/dependency-check-report.csv")
+                        // Parse CSV - improved version
+                        def csvFile = "${WORKSPACE}/reports/dependency-check-report.csv"
+                        def csvContent = readFile(csvFile)
                         def lines = csvContent.split('\n')
-                        def headers = lines[0].split(',')
+                        
+                        // Process headers
+                        def headers = lines[0].split(',')*.trim().collect { it.replaceAll('^"|"$', '') }
                         
                         def severityCount = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
                         def findings = []
 
-                        // Skip header row
+                        // Process each row (skip header)
                         for (int i = 1; i < lines.size(); i++) {
-                            def values = lines[i].split(',')
-                            // Create a map manually instead of using getAt
+                            def values = lines[i].split(',')*.trim().collect { it.replaceAll('^"|"$', '') }
                             def row = [:]
                             headers.eachWithIndex { header, index ->
                                 row[header] = index < values.size() ? values[index] : null
                             }
                             
-                            def sev = row['CVSSv3_BaseSeverity']?.toUpperCase()
+                            // Determine severity - prefer CVSSv3, fall back to CVSSv2
+                            def sev = row['CVSSv3_BaseSeverity']?.toUpperCase() ?: 
+                                    row['CVSSv2_Severity']?.toUpperCase()
+                            
                             if (sev in ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']) {
                                 severityCount[sev] = (severityCount[sev] ?: 0) + 1
                                 findings << [
                                     severity: sev,
-                                    package: "${row['DependencyName']}:${row['Version']}",
-                                    cve: row['CVE'],
+                                    package: "${row['DependencyName'] ?: 'N/A'}:${row['Version'] ?: 'N/A'}",
+                                    cve: row['CVE'] ?: 'N/A',
                                     score: row['CVSSv3_BaseScore'] ?: row['CVSSv2_Score'] ?: 'N/A',
-                                    description: row['ShortDescription']?.take(30) ?: 'No description'
+                                    description: row['ShortDescription']?.take(100) ?: 
+                                                row['Vulnerability']?.take(100) ?: 'No description'
                                 ]
                             }
                         }
 
-                        // Rest of your code remains the same...
+                        // Format top 10 into a Markdown-style table
                         def top10 = findings.sort { a, b -> 
                             def scoreA = a.score == 'N/A' ? 0 : a.score.toFloat()
                             def scoreB = b.score == 'N/A' ? 0 : b.score.toFloat()
@@ -262,7 +268,7 @@ pipeline {
                         def tableHeader = "| Severity | Package           | CVE ID       | Score | Description              |\n" +
                                         "|----------|-------------------|--------------|-------|--------------------------|"
                         def tableRows = top10.collect {
-                            "| ${it.severity.padRight(8)} | ${it.package.take(17).padRight(17)} | ${it.cve.take(12).padRight(12)} | ${it.score.toString().padRight(5)} | ${it.description.take(24).padRight(24)} |"
+                            "| ${it.severity.padRight(8)} | ${(it.package ?: 'N/A').take(17).padRight(17)} | ${(it.cve ?: 'N/A').take(12).padRight(12)} | ${(it.score ?: 'N/A').toString().padRight(5)} | ${(it.description ?: 'N/A').take(24).padRight(24)} |"
                         }.join("\n")
 
                         def slackMessage = """
