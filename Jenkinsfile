@@ -209,18 +209,18 @@ pipeline {
                 script {
                     try {
                         // Run Dependency Check (generate CSV and HTML)
-                        sh '''
-                        mkdir -p reports
-                        cd /applications/php-frontend
-                        dependency-check \
-                            --project ${APP_NAME} \
-                            --out ${APP_DIR}/reports \
-                            --scan . \
-                            --format CSV \
-                            --format HTML \
-                            --nvdApiKey ${NVD_API_KEY} \
-                            --log ${APP_DIR}/reports/dependency-check.log
-                        '''
+                        sh """
+                            mkdir -p ${APP_DIR}/reports
+                            cd ${APP_DIR}
+                            dependency-check \
+                                --project ${APP_NAME} \
+                                --out ${APP_DIR}/reports \
+                                --scan . \
+                                --format CSV \
+                                --format HTML \
+                                --nvdApiKey ${NVD_API_KEY} \
+                                --log ${APP_DIR}/reports/dependency-check.log
+                        """
 
                         def csvFile = "${APP_DIR}/reports/dependency-check-report.csv"
 
@@ -476,14 +476,6 @@ pipeline {
                 script {
                     try {
                         withCredentials([string(credentialsId: 'argocd-token', variable: 'ARGOCD_TOKEN')]) {
-                            // Clone the repository first if needed
-                            checkout([
-                                $class: 'GitSCM',
-                                branches: [[name: 'main']],
-                                extensions: [],
-                                userRemoteConfigs: [[url: 'YOUR_GIT_REPO_URL', credentialsId: 'YOUR_CREDENTIALS_ID']]
-                            ])
-                            
                             dir(APP_DIR) {
                                 echo "Updating ArgoCD manifest with new image tag..."
 
