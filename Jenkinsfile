@@ -372,8 +372,20 @@ pipeline {
                         """
 
                         // Parse summary from JSON
+                        def trivyReport = readJSON file: 'trivy-image-report.json'
+                        if (!trivyReport.Results || trivyReport.Results.isEmpty()) {
+                            slackSend(
+                                channel: SLACK_CHANNEL,
+                                color: 'good',
+                                message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: No vulnerabilities found in Docker image"
+                            )
+                            return
+                        }
                         def vulnCounts = sh (
-                            script: "jq '[.Results[].Vulnerabilities[]?.Severity] | group_by(.) | map({(.[0]): length}) | add' trivy-image-report.json",
+                            script: """
+                                cd /applications/php-frontend
+                                jq '[.Results[].Vulnerabilities[]?.Severity] | group_by(.) | map({(.[0]): length}) | add' trivy-image-report.json
+                            """,
                             returnStdout: true
                         ).trim()
 
