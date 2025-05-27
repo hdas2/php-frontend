@@ -348,7 +348,7 @@ pipeline {
                         sh """
                         cd /applications/php-frontend
                         echo "Building Docker image..."
-                        docker build -t ${ECR_REPO}/${APP_NAME}:${env.BUILD_NUMBER} .
+                        docker build -t ${ECR_REPO}:${env.BUILD_NUMBER} .
                         """
                         slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Docker image built successfully")
                     } catch (e) {
