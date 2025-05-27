@@ -427,28 +427,110 @@ def buildSlackMessage(report) {
 
 
 // OWASP Dependency Check Report Processor
-def processScanResults(appDir) {
-    def reportPath = "${appDir}/reports"
-    def jsonPath = "${reportPath}/dependency-check-report.json"
-    def csvPath = "${reportPath}/dependency-check-report.csv"
-    def htmlPath = "${reportPath}/dependency-check-report.html"
-
-    if (!fileExists(jsonPath)) {
-        error "Dependency Check JSON report not found at ${jsonPath}"
-    }
-
-    echo "📖 Reading Dependency Check report at ${jsonPath}"
-    def report = readJSON file: jsonPath
+def processScanResults() {
+    // Parse JSON report
+    def report = readJSON file: "${WORKSPACE}/reports/dependency-check-report.json"
+    
+    // Count vulnerabilities
     def vulnCounts = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
-
+    def findings = []
+    
     report.dependencies.each { dep ->
         dep.vulnerabilities?.each { vuln ->
             def severity = vuln.severity?.toUpperCase()
             if (vulnCounts.containsKey(severity)) {
                 vulnCounts[severity]++
+                findings << [
+                    severity: severity,
+                    package: dep.fileName,
+                    cve: vuln.name,
+                    cvss: vuln.cvssv3?.baseScore ?: vuln.cvssv2?.score ?: 'N/A',
+                    description: vuln.description?.take(100) ?: 'No description'
+                ]
             }
         }
     }
+    
+    // Generate Markdown table
+    def tableHeader = "| Severity | Package | CVE | CVSS | Description |\n|----------|---------|-----|------|-------------|"
+    def tableRows = findings.take(10).collect { finding ->
+        "| ${finding.severity} | ${finding.package} | ${finding.cve} | ${finding.cvss} | ${finding.description} |"
+    }.join("\n")
+    
+    def fullTable = "${tableHeader}\n${tableRows}"
+    
+    // Send to Slack
+    slackSend(
+        channel: env.SLACK_CHANNEL,
+        color: vulnCounts.CRITICAL > 0 ? 'danger' : (vulnCounts.HIGH > 0 ? 'warning' : 'good'),
+        message: """
+        *Dependency Check Results Summary*
+        Critical: ${vulnCounts.CRITICAL} :red_circle:
+        High: ${vulnCounts.HIGH} :large_orange_circle:
+        Medium: ${vulnCounts.MEDIUM} :yellow_circle:
+        Low: ${vulnCounts.LOW} :white_circle:
+        
+        *Top Vulnerabilities*
+        ```
+        ${fullTable}
+        ```
+        """
+    )
+    
+    // Fail build if critical vulnerabilities found
+    if (vulnCounts.CRITICAL > 0) {
+        error "Build failed: ${vulnCounts.CRITICAL} critical vulnerabilities found"
+    }
+
+    def generateSlackCsvTable(findings) {
+    def csvHeader = "Severity,Package,CVE,CVSS,Description"
+    def csvRows = findings.take(10).collect { finding ->
+        "${finding.severity},${finding.package},${finding.cve},${finding.cvss},\"${finding.description}\""
+    }.join("\n")
+    
+    return "${csvHeader}\n${csvRows}"
+}
+
+// Then in your slackSend:
+message: """
+*Dependency Check Results*
+Critical: ${vulnCounts.CRITICAL}
+High: ${vulnCounts.HIGH}
+Medium: ${vulnCounts.MEDIUM}
+Low: ${vulnCounts.LOW}
+
+*Top Vulnerabilities*
+\`\`\`
+${generateSlackCsvTable(findings)}
+\`\`\`
+"""
+def formatForSlack(findings) {
+    def maxWidths = [severity: 8, package: 30, cve: 15, cvss: 5, description: 50]
+    
+    // Format header
+    def header = "```\n" +
+        "Severity".padRight(maxWidths.severity) + " | " +
+        "Package".padRight(maxWidths.package) + " | " +
+        "CVE".padRight(maxWidths.cve) + " | " +
+        "CVSS".padRight(maxWidths.cvss) + " | " +
+        "Description".padRight(maxWidths.description) + "\n" +
+        "-".padRight(maxWidths.severty, '-') + "-|-" +
+        "-".padRight(maxWidths.package, '-') + "-|-" +
+        "-".padRight(maxWidths.cve, '-') + "-|-" +
+        "-".padRight(maxWidths.cvss, '-') + "-|-" +
+        "-".padRight(maxWidths.description, '-') + "\n"
+    
+    // Format rows
+    def rows = findings.take(10).collect { finding ->
+        finding.severity.padRight(maxWidths.severity) + " | " +
+        finding.package.take(maxWidths.package).padRight(maxWidths.package) + " | " +
+        finding.cve.take(maxWidths.cve).padRight(maxWidths.cve) + " | " +
+        finding.cvss.toString().padRight(maxWidths.cvss) + " | " +
+        finding.description.take(maxWidths.description).padRight(maxWidths.description)
+    }.join("\n")
+    
+    return header + rows + "\n```"
+}
 
     // Slack summary
     def color = vulnCounts.CRITICAL > 0 ? 'danger' :
