@@ -222,6 +222,25 @@ pipeline {
                             --log ${WORKSPACE}/reports/dependency-check.log
                         '''
 
+                        // Parse CSV - with better error handling
+                        def csvFile = "${WORKSPACE}/reports/dependency-check-report.csv"
+                        
+                        // Verify file exists before reading
+                        if (!fileExists(csvFile)) {
+                            error "Dependency Check CSV report not found at: ${csvFile}"
+                        }
+                        
+                        // Read and parse CSV content
+                        def csvContent = readFile(csvFile)
+                        if (!csvContent?.trim()) {
+                            error "Dependency Check CSV report is empty"
+                        }
+                        
+                        def lines = csvContent.split('\n') as List
+                        if (lines.size() < 2) { // Need at least header + 1 row
+                            error "No vulnerabilities found in Dependency Check report"
+                        }
+                        
                         // Process headers
                         def headers = lines[0].split(',').collect { it.trim().replaceAll('^"|"$', '') }
 
@@ -236,17 +255,19 @@ pipeline {
                                 row[header] = index < values.size() ? values[index] : null
                             }
                             
-                            // Determine severity - check all possible severity columns
+                            // Determine severity - more robust detection
                             def sev = row['CVSSv3_BaseSeverity']?.toUpperCase() ?: 
                                     row['CVSSv2_Severity']?.toUpperCase() ?:
-                                    // Some vulnerabilities might have severity in different columns
-                                    (row['CVSSv2_Score']?.toFloat() >= 9.0 ? 'CRITICAL' : 
+                                    (row['CVSSv3_BaseScore']?.toFloat() >= 9.0 ? 'CRITICAL' :
+                                    row['CVSSv3_BaseScore']?.toFloat() >= 7.0 ? 'HIGH' :
+                                    row['CVSSv3_BaseScore']?.toFloat() >= 4.0 ? 'MEDIUM' :
+                                    row['CVSSv3_BaseScore']?.toFloat() > 0 ? 'LOW' :
                                     row['CVSSv2_Score']?.toFloat() >= 7.0 ? 'HIGH' :
                                     row['CVSSv2_Score']?.toFloat() >= 4.0 ? 'MEDIUM' :
                                     row['CVSSv2_Score']?.toFloat() > 0 ? 'LOW' : null)
                             
                             if (sev) {
-                                // Normalize severity (some might come as "CRITICAL" or "HIGHEST")
+                                // Normalize severity
                                 sev = sev.contains('CRIT') ? 'CRITICAL' :
                                     sev.contains('HIGH') ? 'HIGH' :
                                     sev.contains('MED') ? 'MEDIUM' :
@@ -265,6 +286,7 @@ pipeline {
                                 }
                             }
                         }
+
                         // Format top 10 into a Markdown-style table
                         def top10 = findings.sort { a, b -> 
                             def scoreA = a.score == 'N/A' ? 0 : a.score.toFloat()
