@@ -222,18 +222,29 @@ pipeline {
                             --log ${WORKSPACE}/reports/dependency-check.log
                         '''
 
-                        // Parse CSV
-                        def reportRows = readCSV file: "${WORKSPACE}/reports/dependency-check-report.csv"
+                        // Parse CSV - use readFile and split manually to avoid sandbox issues
+                        def csvContent = readFile("${WORKSPACE}/reports/dependency-check-report.csv")
+                        def lines = csvContent.split('\n')
+                        def headers = lines[0].split(',')
+                        
                         def severityCount = [CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0]
                         def findings = []
 
-                        reportRows.each { row ->
+                        // Skip header row
+                        for (int i = 1; i < lines.size(); i++) {
+                            def values = lines[i].split(',')
+                            // Create a map manually instead of using getAt
+                            def row = [:]
+                            headers.eachWithIndex { header, index ->
+                                row[header] = index < values.size() ? values[index] : null
+                            }
+                            
                             def sev = row['CVSSv3_BaseSeverity']?.toUpperCase()
                             if (sev in ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']) {
                                 severityCount[sev] = (severityCount[sev] ?: 0) + 1
                                 findings << [
                                     severity: sev,
-                                    package: row['DependencyName'] + ':' + row['Version'],
+                                    package: "${row['DependencyName']}:${row['Version']}",
                                     cve: row['CVE'],
                                     score: row['CVSSv3_BaseScore'] ?: row['CVSSv2_Score'] ?: 'N/A',
                                     description: row['ShortDescription']?.take(30) ?: 'No description'
@@ -241,8 +252,13 @@ pipeline {
                             }
                         }
 
-                        // Format top 10 into a Markdown-style table
-                        def top10 = findings.sort { -it.score.toString().toFloat() }.take(10)
+                        // Rest of your code remains the same...
+                        def top10 = findings.sort { a, b -> 
+                            def scoreA = a.score == 'N/A' ? 0 : a.score.toFloat()
+                            def scoreB = b.score == 'N/A' ? 0 : b.score.toFloat()
+                            return scoreB <=> scoreA
+                        }.take(10)
+                        
                         def tableHeader = "| Severity | Package           | CVE ID       | Score | Description              |\n" +
                                         "|----------|-------------------|--------------|-------|--------------------------|"
                         def tableRows = top10.collect {
