@@ -476,37 +476,42 @@ pipeline {
                 script {
                     try {
                         withCredentials([string(credentialsId: 'argocd-token', variable: 'ARGOCD_TOKEN')]) {
-                            // Ensure APP_DIR and APP_NAME are defined in environment or pipeline parameters
+                            // Clone the repository first if needed
+                            checkout([
+                                $class: 'GitSCM',
+                                branches: [[name: 'main']],
+                                extensions: [],
+                                userRemoteConfigs: [[url: 'YOUR_GIT_REPO_URL', credentialsId: 'YOUR_CREDENTIALS_ID']]
+                            ])
+                            
                             dir(APP_DIR) {
                                 echo "Updating ArgoCD manifest with new image tag..."
 
+                                // Use full path to yq if needed
                                 sh """
-                                    # No need to cd, dir() does that
-                                    yq e '.image.tag = "${BUILD_NUMBER}"' -i helm/charts/values.yaml
-                                    pwd
+                                    /usr/local/bin/yq e '.image.tag = "${env.BUILD_NUMBER}"' -i helm/charts/values.yaml
+                                    git config --global --add safe.directory '*'  # Fix Git security in container
                                     git config user.name "hdas2"
                                     git config user.email "hdas2@sastasundar.com"
                                     git add helm/charts/values.yaml
-                                    git commit -m "Update ${APP_NAME} image to ${BUILD_NUMBER}" || echo 'No changes to commit'
+                                    git commit -m "Update ${APP_NAME} image to ${env.BUILD_NUMBER}" || echo 'No changes to commit'
                                     git push origin main
                                 """
                             }
 
-                            // Use double quotes for variable interpolation here
-                            withEnv(["ARGOCD_TOKEN=${ARGOCD_TOKEN}"]) {
-                                sh """
-                                    curl -X POST \
-                                    -H "Authorization: Bearer \$ARGOCD_TOKEN" \
-                                    ${ARGOCD_SERVER}/api/v1/applications/${APP_NAME}/sync \
-                                    -d '{}'
-                                """
-                            }
+                            // Trigger ArgoCD sync
+                            sh """
+                                curl -X POST \
+                                -H "Authorization: Bearer ${ARGOCD_TOKEN}" \
+                                ${ARGOCD_SERVER}/api/v1/applications/${APP_NAME}/sync \
+                                -d '{}'
+                            """
                         }
 
                         slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: ArgoCD manifest updated and synced")
                     } catch (e) {
-                        slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Failed to update ArgoCD manifest")
-                        error "Failed to update ArgoCD manifest"
+                        slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Failed to update ArgoCD manifest - ${e.toString()}")
+                        error "Failed to update ArgoCD manifest: ${e.toString()}"
                     }
                 }
             }
