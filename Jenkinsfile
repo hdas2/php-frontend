@@ -363,20 +363,68 @@ pipeline {
             steps {
                 script {
                     try {
+                        // Run scan and generate both JSON and table reports
                         sh """
                         cd /applications/php-frontend
-                        echo "Scanning Docker image for vulnerabilities..."
-                        trivy image --exit-code 1 --severity CRITICAL --ignore-unfixed ${ECR_REPO}:${env.BUILD_NUMBER}
+                        echo "Running Trivy image scan..."
+                        trivy image --format json --output trivy-image-report.json --ignore-unfixed ${ECR_REPO}:${env.BUILD_NUMBER}
+                        trivy image --format table --output trivy-image-report.txt --ignore-unfixed ${ECR_REPO}:${env.BUILD_NUMBER}
                         """
-                        slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Docker image scan passed")
+
+                        // Parse summary from JSON
+                        def vulnCounts = sh (
+                            script: "jq '[.Results[].Vulnerabilities[]?.Severity] | group_by(.) | map({(.[0]): length}) | add' trivy-image-report.json",
+                            returnStdout: true
+                        ).trim()
+
+                        def summary = readJSON text: vulnCounts
+
+                        def emojiMap = [
+                            "CRITICAL": "🚨",
+                            "HIGH": "🔴",
+                            "MEDIUM": "🟠",
+                            "LOW": "🟡",
+                            "UNKNOWN": "⚪"
+                        ]
+
+                        def summaryText = summary.collect { severity, count ->
+                            "${emojiMap.get(severity, '')} *${severity}*: ${count}"
+                        }.join("\\n")
+
+                        // Send visual Slack summary
+                        slackSend(
+                            channel: SLACK_CHANNEL,
+                            color: summary['CRITICAL']?.toInteger() > 0 ? 'danger' : 'good',
+                            message: """
+                        🛡️ *Trivy Scan Summary* for `${env.JOB_NAME}` #${env.BUILD_NUMBER}
+                        ${summaryText}
+                        """
+                        )
+
+                        // Upload full report
+                        slackUploadFile(
+                            channel: SLACK_CHANNEL,
+                            filePath: 'trivy-image-report.txt',
+                            initialComment: "📄 *Full Trivy Report* for ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+                        )
+
+                        // Fail the build if CRITICAL found
+                        if (summary['CRITICAL']?.toInteger() > 0) {
+                            error "Trivy found CRITICAL vulnerabilities"
+                        }
+
                     } catch (e) {
-                        slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Docker image scan found critical vulnerabilities")
-                        error "Docker image scan failed"
+                        slackSend(
+                            channel: SLACK_CHANNEL,
+                            color: 'danger',
+                            message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Failed to run or process Trivy scan"
+                        )
+                        error "Docker image scan stage failed"
                     }
                 }
             }
         }
-        
+
         stage('Push to ECR') {
             steps {
                 script {
