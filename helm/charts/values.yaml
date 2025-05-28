@@ -2,7 +2,7 @@ replicaCount: 2
 image:
   repository: 699951450237.dkr.ecr.ap-south-1.amazonaws.com/rspl-sandbox-ecr/php-frontend
   pullPolicy: IfNotPresent
-  tag: "131"
+  tag: "147"
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
