@@ -485,6 +485,7 @@ pipeline {
                                     git config --global --add safe.directory '*'  # Fix Git security in container
                                     git config user.name "hdas2"
                                     git config user.email "hdas2@sastasundar.com"
+                                    git remote set-url origin https://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@github.com/hdas2/your-repo.git
                                     git add helm/charts/values.yaml
                                     git commit -m "Update ${APP_NAME} image to ${env.BUILD_NUMBER}" || echo 'No changes to commit'
                                     git push origin main
