@@ -477,7 +477,7 @@ pipeline {
                     try {
                         withCredentials([
                             string(credentialsId: 'argocd-token', variable: 'ARGOCD_TOKEN'),
-                            string(credentialsId: 'github-credential', variable: 'GITHUB_TOKEN')
+                            string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')
                         ]) {
                             dir(APP_DIR) {
                                 echo "Updating ArgoCD manifest with new image tag..."
