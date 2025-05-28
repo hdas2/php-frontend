@@ -65,8 +65,9 @@ istio:
 service:
   type: ClusterIP
   port: 80
-  targetPort: http
-  istio:
+  targetPort: 8080
+istio:
+  enabled: false
   telemetry:
     enabled: true
     prometheus:
@@ -78,3 +79,9 @@ service:
     tracing:
       enabled: true
       provider: tempo
+replicaCount: 1
+image:
+  repository: nginx
+  tag: stable
+  pullPolicy: IfNotPresent
+
