@@ -477,7 +477,7 @@ pipeline {
                     try {
                         withCredentials([
                             string(credentialsId: 'argocd-token', variable: 'ARGOCD_TOKEN'),
-                            string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')
+                            string(credentialsId: 'github-credential', variable: 'GITHUB_TOKEN')
                         ]) {
                             dir(APP_DIR) {
                                 echo "Updating ArgoCD manifest with new image tag..."
@@ -486,7 +486,6 @@ pipeline {
                                     yq e '.image.tag = "${env.BUILD_NUMBER}"' -i helm/charts/values.yaml
                                     git config --global user.name "hdas2"
                                     git config --global user.email "hdas2@sastasundar.com"
-                                    git config --global --add safe.directory /applications/php-frontend
                                     git remote set-url origin https://hdas2:${GITHUB_TOKEN}@github.com/hdas2/php-frontend.git
                                     git add helm/charts/values.yaml
                                     git commit -m "Update ${APP_NAME} image to ${env.BUILD_NUMBER}" || echo 'No changes to commit'
