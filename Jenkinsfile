@@ -475,17 +475,21 @@ pipeline {
             steps {
                 script {
                     try {
-                        withCredentials([string(credentialsId: 'argocd-token', variable: 'ARGOCD_TOKEN')]) {
+                        withCredentials([
+                            string(credentialsId: 'argocd-token', variable: 'ARGOCD_TOKEN'),
+                            string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')
+                        ]) {
                             dir(APP_DIR) {
                                 echo "Updating ArgoCD manifest with new image tag..."
 
-                                // Use full path to yq if needed
                                 sh """
                                     /usr/local/bin/yq e '.image.tag = "${env.BUILD_NUMBER}"' -i helm/charts/values.yaml
-                                    git config --global --add safe.directory '*'  # Fix Git security in container
+
+                                    git config --global --add safe.directory '*'
                                     git config user.name "hdas2"
                                     git config user.email "hdas2@sastasundar.com"
-                                    git remote set-url origin https://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@github.com/hdas2/your-repo.git
+                                    git remote set-url origin https://github.com/hdas2/your-repo.git
+
                                     git add helm/charts/values.yaml
                                     git commit -m "Update ${APP_NAME} image to ${env.BUILD_NUMBER}" || echo 'No changes to commit'
                                     git push origin main
@@ -499,9 +503,9 @@ pipeline {
                                 ${ARGOCD_SERVER}/api/v1/applications/${APP_NAME}/sync \
                                 -d '{}'
                             """
-                        }
 
-                        slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: ArgoCD manifest updated and synced")
+                            slackSend(channel: SLACK_CHANNEL, color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER}: ArgoCD manifest updated and synced")
+                        }
                     } catch (e) {
                         slackSend(channel: SLACK_CHANNEL, color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER}: Failed to update ArgoCD manifest - ${e.toString()}")
                         error "Failed to update ArgoCD manifest: ${e.toString()}"
@@ -509,6 +513,7 @@ pipeline {
                 }
             }
         }
+
 
         stage('Post-Deployment Checks') {
             steps {
