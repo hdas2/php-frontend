@@ -484,6 +484,8 @@ pipeline {
 
                                 sh """
                                     yq e '.image.tag = "${env.BUILD_NUMBER}"' -i helm/charts/values.yaml
+                                    git config --global user.name "hdas2"
+                                    git config --global user.email "hdas2@sastasundar.com"
                                     git config --global --add safe.directory /applications/php-frontend
                                     git remote set-url origin https://github.com/hdas2/php-frontend.git
                                     git add helm/charts/values.yaml
