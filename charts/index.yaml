@@ -3,11 +3,20 @@ entries:
   php-frontend:
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2025-05-28T08:47:21.305892406Z"
+    created: "2025-05-28T09:08:10.825028274Z"
+    description: A Helm chart for PHP 8 Frontend with Nginx
+    digest: 18a705f88ca577be0721f097923387b3cbad699d89e55f6fdcbedbe95386d43b
+    name: php-frontend
+    urls:
+    - https://hdas2.github.io/php-frontend/charts/php-frontend-0.1.1.tgz
+    version: 0.1.1
+  - apiVersion: v2
+    appVersion: 1.0.0
+    created: "2025-05-28T09:08:10.824152154Z"
     description: A Helm chart for PHP 8 Frontend with Nginx
     digest: 31dead67088db4fd98e3853866ee95ed06bfae75464c7be0d96151e7849c7052
     name: php-frontend
     urls:
     - https://hdas2.github.io/php-frontend/charts/php-frontend-0.1.0.tgz
     version: 0.1.0
-generated: "2025-05-28T08:47:21.30448931Z"
+generated: "2025-05-28T09:08:10.823063571Z"
