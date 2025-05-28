@@ -483,13 +483,9 @@ pipeline {
                                 echo "Updating ArgoCD manifest with new image tag..."
 
                                 sh """
-                                    /usr/local/bin/yq e '.image.tag = "${env.BUILD_NUMBER}"' -i helm/charts/values.yaml
-
-                                    git config --global --add safe.directory '*'
-                                    git config user.name "hdas2"
-                                    git config user.email "hdas2@sastasundar.com"
-                                    git remote set-url origin https://github.com/hdas2/your-repo.git
-
+                                    yq e '.image.tag = "${env.BUILD_NUMBER}"' -i helm/charts/values.yaml
+                                    git config --global --add safe.directory /applications/php-frontend
+                                    git remote set-url origin https://github.com/hdas2/php-frontend.git
                                     git add helm/charts/values.yaml
                                     git commit -m "Update ${APP_NAME} image to ${env.BUILD_NUMBER}" || echo 'No changes to commit'
                                     git push origin main
