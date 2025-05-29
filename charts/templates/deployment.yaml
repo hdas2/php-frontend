@@ -5,6 +5,15 @@ metadata:
   labels:
     {{- include "php-frontend.labels" . | nindent 4 }}
 spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "php-frontend.selectorLabels" . | nindent 6 }}
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
   template:
     metadata:
       annotations:
@@ -18,23 +27,48 @@ spec:
         version: v1
         {{- end }}
     spec:
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
-          # ... existing container config ...
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
           {{- if .Values.istio.enabled }}
-          # Istio-specific readiness/liveness probes
           readinessProbe:
             httpGet:
               path: /index.php
-              port: 80
+              port: {{ .Values.service.targetPort }}
             initialDelaySeconds: 5
             periodSeconds: 5
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /index.php
-              port: 80
+              port: {{ .Values.service.targetPort }}
             initialDelaySeconds: 30
             periodSeconds: 10
+            failureThreshold: 3
           {{- end }}
-
-
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: APP_ENV
+              value: "production"
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

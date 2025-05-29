@@ -7,8 +7,18 @@ metadata:
     {{- include "php-frontend.labels" . | nindent 4 }}
 spec:
   host: {{ include "php-frontend.fullname" . }}
+  {{- with .Values.istio.destinationRule.trafficPolicy }}
   trafficPolicy:
-    {{- toYaml .Values.istio.destinationRule.trafficPolicy | nindent 4 }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   subsets:
-    {{- toYaml .Values.istio.destinationRule.subsets | nindent 4 }}
+    {{- range .Values.istio.destinationRule.subsets }}
+    - name: {{ .name }}
+      labels:
+        {{- toYaml .labels | nindent 8 }}
+      {{- if .trafficPolicy }}
+      trafficPolicy:
+        {{- toYaml .trafficPolicy | nindent 8 }}
+      {{- end }}
+    {{- end }}
 {{- end }}

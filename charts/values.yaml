@@ -1,59 +1,51 @@
+# Application Scaling
 replicaCount: 2
-image:
-  repository: 699951450237.dkr.ecr.ap-south-1.amazonaws.com/rspl-sandbox-ecr/php-frontend
-  pullPolicy: IfNotPresent
-  tag: "151"
-imagePullSecrets: []
-nameOverride: ""
-fullnameOverride: ""
-service:
-  type: ClusterIP
-  port: 80
-ingress:
-  enabled: true
-  className: ""
-  annotations:
-    kubernetes.io/ingress.class: alb
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
-  hosts:
-    - host: php-frontend.retailershakti.com
-      paths:
-        - path: /
-          pathType: Prefix
-  tls: []
-resources:
-  limits:
-    cpu: 500m
-    memory: 512Mi
-  requests:
-    cpu: 200m
-    memory: 256Mi
 autoscaling:
   enabled: true
   minReplicas: 2
   maxReplicas: 5
   targetCPUUtilizationPercentage: 80
   targetMemoryUtilizationPercentage: 80
-nodeSelector: {}
-tolerations: []
-affinity: {}
-# Add these to your existing values.yaml
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+
+# Container Image Configuration
+image:
+  repository: 699951450237.dkr.ecr.ap-south-1.amazonaws.com/rspl-sandbox-ecr/php-frontend
+  pullPolicy: IfNotPresent
+  tag: "151"
+  imagePullSecrets:
+    - name: ecr-registry-secret
+
+# Service Configuration
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+  annotations: {}
+  # For LoadBalancer type:
+  # loadBalancerIP: ""
+  # externalTrafficPolicy: Local
+
+# Istio Configuration
 istio:
   enabled: true
-  virtualService:
-    hosts:
-      - php-frontend.retailershakti.com
-    gateways:
-      - istio-system/istio-gateway
-    trafficPolicy:
-      tls:
-        mode: ISTIO_MUTUAL
+  meshConfig:
+    enableAutoMtls: true
   destinationRule:
     trafficPolicy:
       tls:
         mode: ISTIO_MUTUAL
+      connectionPool:
+        tcp: 
+          maxConnections: 100
+        http:
+          http2MaxRequests: 1000
     subsets:
       - name: v1
         labels:
@@ -61,27 +53,61 @@ istio:
       - name: v2
         labels:
           version: v2
-# Update service type to ClusterIP (required for Istio)
-service:
-  type: ClusterIP
-  port: 80
-  targetPort: 8080
-istio:
-  enabled: false
-  telemetry:
-    enabled: true
-    prometheus:
-      enabled: true
-    grafana:
-      enabled: true
-    kiali:
-      enabled: true
-    tracing:
-      enabled: true
-      provider: tempo
-replicaCount: 1
-image:
-  repository: nginx
-  tag: stable
-  pullPolicy: IfNotPresent
+  virtualService:
+    hosts:
+      - php-frontend.retailershakti.com
+    gateways:
+      - istio-system/istio-gateway
+    retries:
+      attempts: 3
+      perTryTimeout: 2s
+    timeout: 10s
 
+# Ingress Configuration (ALB)
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/healthcheck-port: "80"
+  hosts:
+    - host: php-frontend.retailershakti.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Resource Limits
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+# Pod Scheduling
+nodeSelector: {}
+tolerations: []
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values:
+            - {{ .Chart.Name }}
+        topologyKey: kubernetes.io/hostname
+
+# Monitoring
+prometheus:
+  enabled: true
+  scrapeInterval: 30s
+  scrapeTimeout: 10s

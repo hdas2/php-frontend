@@ -6,14 +6,34 @@ metadata:
     {{- include "php-frontend.labels" . | nindent 4 }}
   {{- if .Values.istio.enabled }}
   annotations:
+    {{- if eq .Values.service.type "LoadBalancer" }}
     service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    {{- end }}
+    {{- with .Values.istio.serviceAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- else if .Values.service.annotations }}
+  annotations:
+    {{- toYaml .Values.service.annotations | nindent 4 }}
   {{- end }}
 spec:
-  type: {{ .Values.service.type }}
+  type: {{ .Values.service.type | default "ClusterIP" }}
+  {{- if and (eq .Values.service.type "LoadBalancer") .Values.service.loadBalancerIP }}
+  loadBalancerIP: {{ .Values.service.loadBalancerIP }}
+  {{- end }}
   ports:
     - name: http
-      port: {{ .Values.service.port }}
+      port: {{ .Values.service.port | default 80 }}
       targetPort: {{ .Values.service.targetPort | default "http" }}
       protocol: TCP
+      {{- if .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
   selector:
     {{- include "php-frontend.selectorLabels" . | nindent 4 }}
+  {{- if .Values.istio.enabled }}
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
+  {{- end }}

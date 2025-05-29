@@ -1,4 +1,7 @@
-{{/* Common labels */}}
+{{/* vim: set filetype=mustache: */}}
+{{/*
+Common labels
+*/}}
 {{- define "php-frontend.labels" -}}
 helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
 {{ include "php-frontend.selectorLabels" . }}
@@ -6,15 +9,19 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- end }}
+{{- end -}}
 
-{{/* Selector labels */}}
+{{/*
+Selector labels
+*/}}
 {{- define "php-frontend.selectorLabels" -}}
 app.kubernetes.io/name: {{ .Chart.Name }}
 app.kubernetes.io/instance: {{ .Release.Name }}
-{{- end }}
+{{- end -}}
 
-{{/* Full name */}}
+{{/*
+Create the name of the service account to use
+*/}}
 {{- define "php-frontend.fullname" -}}
 {{- printf "%s-%s" .Release.Name .Chart.Name | trunc 63 | trimSuffix "-" -}}
-{{- end }}
+{{- end -}}

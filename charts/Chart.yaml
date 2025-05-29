@@ -4,3 +4,31 @@ description: A Helm chart for PHP 8 Frontend with Nginx
 type: application
 version: 0.1.1
 appVersion: "1.0.0"
+
+# Metadata for better discoverability
+annotations:
+  category: Web
+  artifacthub.io/links: |
+    - name: Source Code
+      url: https://github.com/hdas2/php-frontend
+    - name: Documentation
+      url: https://retailershakti.com/docs/php-frontend
+  artifacthub.io/images: |
+    - name: php-frontend
+      image: 699951450237.dkr.ecr.ap-south-1.amazonaws.com/rspl-sandbox-ecr:151
+
+# Dependencies (if any)
+dependencies:
+  - name: nginx
+    version: ~13.2.0
+    repository: https://charts.bitnami.com/bitnami
+    condition: nginx.enabled
+
+# Maintainer information
+maintainers:
+  - name: DevOps Team
+    email: devops@retailershakti.com
+    url: https://retailershakti.com
+
+# Kubernetes version constraints
+kubeVersion: ">=1.21.0-0"
